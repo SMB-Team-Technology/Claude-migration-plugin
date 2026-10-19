@@ -1,0 +1,12 @@
+{
+  "name": "claude-migration-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude plugin that exports chats, memories, skills, scheduled tasks and artifacts for import into AI Workforce Pro",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}
