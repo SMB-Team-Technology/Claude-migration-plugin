@@ -1,0 +1,8 @@
+{
+  "name": "claude-migration",
+  "version": "0.1.0",
+  "description": "Export your Claude chats, memories, skills, scheduled tasks and artifacts into a single migration bundle you can import into AI Workforce Pro. You choose what is included.",
+  "author": { "name": "SMB Team Technology" },
+  "license": "MIT",
+  "keywords": ["migration", "export", "claude", "ai-workforce-pro"]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "smb-team-technology",
+  "owner": { "name": "SMB Team Technology" },
+  "plugins": [
+    {
+      "name": "claude-migration",
+      "source": "./",
+      "description": "Export your Claude chats, memories, skills, scheduled tasks and artifacts for import into AI Workforce Pro."
+    }
+  ]
+}
