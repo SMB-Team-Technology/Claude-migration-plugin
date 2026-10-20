@@ -33,6 +33,12 @@ const itemDetail = {
   artifacts: (item) => item.type,
 };
 
+/** Staged items win over export items with the same id, so a chat is never listed twice. */
+const mergeById = (preferred, others) => {
+  const seen = new Set(preferred.map((item) => item.id));
+  return [...preferred, ...others.filter((item) => !seen.has(item.id))];
+};
+
 /** Reads every source the options point at and returns the full, unfiltered set per category. */
 export const collect = async (options = {}) => {
   const exported = options.exportPath ? await readExport(options.exportPath) : {};
@@ -43,7 +49,10 @@ export const collect = async (options = {}) => {
   const exportedMemories = extractMemories(exported.memories);
   const exportedArtifacts = extractArtifacts(rawConversations);
   return {
-    conversations: rawConversations.map(toBundleConversation).filter((chat) => chat.messages.length > 0),
+    conversations: mergeById(
+      staged.conversations,
+      rawConversations.map(toBundleConversation).filter((chat) => chat.messages.length > 0),
+    ),
     memories: [...staged.memories, ...exportedMemories],
     skills: options.skipLocalSkills ? [] : await scanSkills(skillRoots),
     scheduledTasks: staged.scheduledTasks,

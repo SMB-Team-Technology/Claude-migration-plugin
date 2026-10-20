@@ -16,7 +16,7 @@ Nothing is uploaded by the plugin. It writes a local `aiwp-migration-bundle.json
 Run `/migrate` (or ask Claude to "migrate my Claude data to AI Workforce Pro"). Claude will:
 
 1. Ask what you want to migrate.
-2. Collect it. Chats and artifacts come from the claude.ai data export (Settings → Privacy → Export data); skills are read from `~/.claude/skills`; memories and scheduled tasks are read by Claude itself and staged as JSON.
+2. Collect it. Chats come from Claude's own chat-history tools when it has them, otherwise from the claude.ai data export (Settings → Privacy → Export data), which is also where artifacts are recovered from; skills are read from `~/.claude/skills`; memories and scheduled tasks are read by Claude itself and staged as JSON.
 3. Show you what was found and flag anything that looks like it contains a credential, which is left out unless you say otherwise.
 4. Write the bundle and tell you how to import it.
 

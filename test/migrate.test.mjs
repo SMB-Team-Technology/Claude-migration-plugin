@@ -108,3 +108,25 @@ test('CLI build writes a private bundle that validates', async () => {
   const check = await run('node', [cli, 'validate', out]);
   assert.equal(JSON.parse(check.stdout).valid, true);
 });
+
+test('staged conversations work without an export and win over export duplicates', async () => {
+  const { dir, zip } = await workspace();
+  const inputs = path.join(dir, 'chat-inputs');
+  await mkdir(inputs);
+  await writeFile(
+    path.join(inputs, 'conversations.json'),
+    JSON.stringify([
+      { id: 'c1', title: 'From tools', messages: [{ role: 'human', text: 'Hi' }, { role: 'assistant', text: '' }, { role: 'assistant', text: 'Hello' }] },
+      { id: 'empty', title: 'Nothing', messages: [] },
+    ]),
+  );
+
+  const only = await collect({ inputsDir: inputs, skipLocalSkills: true });
+  assert.deepEqual(only.conversations.map((c) => [c.id, c.title, c.messages.map((m) => m.role)]), [
+    ['c1', 'From tools', ['user', 'assistant']],
+  ]);
+
+  const merged = await collect({ inputsDir: inputs, exportPath: zip, skipLocalSkills: true });
+  assert.equal(merged.conversations.length, 1);
+  assert.equal(merged.conversations[0].title, 'From tools');
+});
