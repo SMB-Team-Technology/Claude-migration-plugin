@@ -45,3 +45,7 @@ Every category is optional and omitted when empty. Every item has an `id` that i
 - Artifacts are the final version after replaying create, update and rewrite edits.
 - Items that appear to contain credentials are left out by the plugin unless the user opts in.
 - Compatibility: new optional fields may be added within v1. A breaking change bumps `version`, and the importer rejects versions it does not know.
+
+## Staging files (plugin input, not part of the bundle)
+
+Claude can stage `conversations.json`, `memories.json`, `scheduled-tasks.json` and `artifacts.json` in the inputs folder for data only it can reach. `conversations.json` takes the bundle's conversation shape (`role` may also be `human`). A staged chat replaces an export chat with the same id.

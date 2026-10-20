@@ -15,7 +15,8 @@ Ask which of these the user wants to migrate (multi-select): **Chats, Memories, 
 
 | Category | Where it comes from |
 |---|---|
-| Chats, Artifacts | The claude.ai data export. Ask for the path to the `.zip` (or extracted folder). If they do not have one: claude.ai → Settings → Privacy → **Export data**; the download link is emailed and may take a while. Artifacts are rebuilt from the chats in that export. |
+| Chats | **Try your own chat-history tools first** (for example tools that list recent chats or search/fetch past conversations). If you have them, gather the chats and write `$WORK/inputs/conversations.json` (below). If you have no such tool, or it cannot return full messages, use the data export instead. |
+| Chats, Artifacts (export) | The claude.ai data export. Ask for the path to the `.zip` (or extracted folder). If they do not have one: claude.ai → Settings → Privacy → **Export data**; the download link is emailed and may take a while. Artifacts are rebuilt from the chats in that export. The export is also the most complete source, so offer it when the tool route is partial. |
 | Skills | Read from `~/.claude/skills` automatically. Ask whether there are other skill folders; pass each with `--skills-dir`. |
 | Memories | Only you can read these. Write them to `$WORK/inputs/memories.json` (below). |
 | Scheduled tasks | Only you can read these. List them with whichever scheduled-task tool you have (for example a scheduled-tasks or cron list tool), then write `$WORK/inputs/scheduled-tasks.json`. |
@@ -34,7 +35,15 @@ Staging files are plain JSON, written by you from real data. Never invent entrie
 [{ "id": "intake-form", "title": "Intake form", "type": "text/html", "content": "<!doctype html>..." }]
 ```
 
-Keep prompts and memories verbatim. Do not summarise away detail.
+```jsonc
+// conversations.json: full messages in order, oldest first
+[{ "id": "<chat id>", "title": "Lease review", "createdAt": "2026-01-02T10:00:00Z",
+   "messages": [{ "role": "user", "text": "…" }, { "role": "assistant", "text": "…" }] }]
+```
+
+Chats via tools: ask the user how many or which (for example the last 50, or a date range or topic), because fetching every chat one by one is slow. Save only message text that a tool actually returned. If a tool returns only snippets or summaries, do not stage them as if they were full chats: tell the user those chats are partial and recommend the export for them. Report how many chats you staged and how many you could not fetch in full.
+
+Keep prompts, memories and chat text verbatim. Do not summarise away detail.
 
 ## 2. Show what was found
 

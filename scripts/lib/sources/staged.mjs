@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { toBundleConversation } from './export.mjs';
 
 const readOptional = async (dir, name) => {
   const text = await readFile(path.join(dir, name), 'utf8').catch(() => null);
@@ -38,6 +39,26 @@ const toArtifact = (artifact, index) => ({
   content: artifact.content ?? '',
 });
 
+const toConversation = (chat, index) => {
+  if (Array.isArray(chat.chat_messages)) {
+    return toBundleConversation(chat);
+  }
+  const messages = (chat.messages ?? [])
+    .map((message) => ({
+      role: message.role === 'user' || message.role === 'human' ? 'user' : 'assistant',
+      text: message.text ?? message.content ?? '',
+      ...(message.thinking ? { thinking: message.thinking } : {}),
+      ...(message.createdAt ?? message.created_at ? { createdAt: message.createdAt ?? message.created_at } : {}),
+    }))
+    .filter((message) => typeof message.text === 'string' && message.text.trim());
+  return {
+    id: String(chat.id ?? chat.uuid ?? `chat-${index + 1}`),
+    title: (chat.title ?? chat.name ?? '').trim() || 'Imported Claude chat',
+    ...(chat.createdAt ?? chat.created_at ? { createdAt: chat.createdAt ?? chat.created_at } : {}),
+    messages,
+  };
+};
+
 const toMemory = (memory, index) => ({
   id: String(memory?.id ?? `memory-${index + 1}`),
   value: (typeof memory === 'string' ? memory : (memory.value ?? memory.text ?? memory.content ?? '')).trim(),
@@ -50,14 +71,18 @@ const toMemory = (memory, index) => ({
  */
 export const readStaged = async (dir) => {
   if (!dir) {
-    return { memories: [], scheduledTasks: [], artifacts: [] };
+    return { conversations: [], memories: [], scheduledTasks: [], artifacts: [] };
   }
-  const [memories, tasks, artifacts] = await Promise.all([
+  const [chats, memories, tasks, artifacts] = await Promise.all([
+    readOptional(dir, 'conversations.json'),
     readOptional(dir, 'memories.json'),
     readOptional(dir, 'scheduled-tasks.json'),
     readOptional(dir, 'artifacts.json'),
   ]);
   return {
+    conversations: asList(chats, 'conversations')
+      .map(toConversation)
+      .filter((chat) => chat.messages.length > 0),
     memories: asList(memories, 'memories').map(toMemory).filter((memory) => memory.value),
     scheduledTasks: asList(tasks, 'tasks').map(toTask).filter((task) => task.prompt),
     artifacts: asList(artifacts, 'artifacts').map(toArtifact).filter((artifact) => artifact.content.trim()),
