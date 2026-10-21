@@ -1,9 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { toBundleConversation } from './export.mjs';
+import { toProject } from './projects.mjs';
 
 const readOptional = async (dir, name) => {
-  const text = await readFile(path.join(dir, name), 'utf8').catch(() => null);
+  const text = await readFile(path.join(dir, name), 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
   if (text === null) {
     return undefined;
   }
@@ -54,6 +58,7 @@ const toConversation = (chat, index) => {
   return {
     id: String(chat.id ?? chat.uuid ?? `chat-${index + 1}`),
     title: (chat.title ?? chat.name ?? '').trim() || 'Imported Claude chat',
+    ...(chat.projectId ? { projectId: chat.projectId } : {}),
     ...(chat.createdAt ?? chat.created_at ? { createdAt: chat.createdAt ?? chat.created_at } : {}),
     messages,
   };
@@ -71,15 +76,17 @@ const toMemory = (memory, index) => ({
  */
 export const readStaged = async (dir) => {
   if (!dir) {
-    return { conversations: [], memories: [], scheduledTasks: [], artifacts: [] };
+    return { projects: [], conversations: [], memories: [], scheduledTasks: [], artifacts: [] };
   }
-  const [chats, memories, tasks, artifacts] = await Promise.all([
+  const [projects, chats, memories, tasks, artifacts] = await Promise.all([
+    readOptional(dir, 'projects.json'),
     readOptional(dir, 'conversations.json'),
     readOptional(dir, 'memories.json'),
     readOptional(dir, 'scheduled-tasks.json'),
     readOptional(dir, 'artifacts.json'),
   ]);
   return {
+    projects: asList(projects, 'projects').map(toProject),
     conversations: asList(chats, 'conversations')
       .map(toConversation)
       .filter((chat) => chat.messages.length > 0),

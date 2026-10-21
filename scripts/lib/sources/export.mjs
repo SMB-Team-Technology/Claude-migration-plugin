@@ -2,7 +2,19 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { readZip } from '../zip.mjs';
 
-const EXPORT_FILES = ['conversations.json', 'memories.json'];
+const EXPORT_FILES = ['conversations.json', 'memories.json', 'projects.json'];
+
+const checkedExport = (data) => {
+  if (Object.values(data).every((value) => value === undefined)) {
+    throw new Error('No export payload found. Download the actual conversations, memories or projects archive, not just the export index. For extracted exports, pass the folder containing those JSON files.');
+  }
+  for (const key of ['conversations', 'projects']) {
+    if (data[key] !== undefined && !Array.isArray(data[key])) {
+      throw new Error(`${key}.json must contain an array. This may be an export index rather than a data payload.`);
+    }
+  }
+  return data;
+};
 
 const parseJson = (text, label) => {
   try {
@@ -19,18 +31,25 @@ export const readExport = async (target) => {
     const names = await readdir(target);
     const read = async (name) =>
       names.includes(name) ? parseJson(await readFile(path.join(target, name), 'utf8'), name) : undefined;
-    const [conversations, memories] = await Promise.all(EXPORT_FILES.map(read));
-    return { conversations, memories };
+    const [conversations, memories, projects] = await Promise.all(EXPORT_FILES.map(read));
+    return checkedExport({ conversations, memories, projects });
   }
   if (target.toLowerCase().endsWith('.json')) {
-    return { conversations: parseJson(await readFile(target, 'utf8'), path.basename(target)) };
+    const name = path.basename(target).toLowerCase();
+    if (!EXPORT_FILES.includes(name)) {
+      throw new Error('Pass conversations.json, memories.json or projects.json, or the actual export archive. Export indexes are not payloads.');
+    }
+    return checkedExport({ [name.replace('.json', '')]: parseJson(await readFile(target, 'utf8'), name) });
   }
   const entries = readZip(await readFile(target));
   const read = (name) => {
-    const key = [...entries.keys()].find((entry) => entry === name || entry.endsWith(`/${name}`));
-    return key ? parseJson(entries.get(key)().toString('utf8'), name) : undefined;
+    const keys = [...entries.keys()].filter((entry) => entry === name || entry.endsWith(`/${name}`));
+    if (keys.length > 1) {
+      throw new Error(`Ambiguous export: multiple ${name} payloads. Extract and choose one explicitly.`);
+    }
+    return keys.length ? parseJson(entries.get(keys[0])().toString('utf8'), name) : undefined;
   };
-  return { conversations: read('conversations.json'), memories: read('memories.json') };
+  return checkedExport({ conversations: read('conversations.json'), memories: read('memories.json'), projects: read('projects.json') });
 };
 
 const blockText = (message) => {
@@ -66,6 +85,7 @@ const toMessage = (message) => {
 export const toBundleConversation = (conversation) => ({
   id: conversation.uuid,
   title: conversation.name?.trim() || 'Imported Claude chat',
+  ...(conversation.project_uuid ? { projectId: conversation.project_uuid } : {}),
   ...(conversation.created_at ? { createdAt: conversation.created_at } : {}),
   ...(conversation.updated_at ? { updatedAt: conversation.updated_at } : {}),
   messages: (conversation.chat_messages ?? []).flatMap(toMessage),

@@ -34,9 +34,22 @@ const sourcesFrom = (values) => ({
 
 const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 
+const coverage = (values, collected) => ({
+  verifiedAtDestination: false,
+  warnings: [
+    'Cloud exports do not establish coverage of local Cowork projects or sessions. Stage local data from verified sources separately.',
+    'Project files, attachments and connectors are not migrated. Projects contain instructions and text context only.',
+    ...CATEGORIES.filter((category) => collected[category].length === 0)
+      .map((category) => `No ${category} collected; this is not proof that the source account has none.`),
+    ...collected.projects.flatMap((project) => project.migrationWarnings ?? []),
+  ],
+  sources: { export: values.export ?? null, staged: values.inputs ?? null },
+});
+
 const commands = {
   async scan(values) {
-    print(summarize(await collect(sourcesFrom(values))));
+    const collected = await collect(sourcesFrom(values));
+    print({ categories: summarize(collected), coverage: coverage(values, collected) });
   },
 
   async build(values) {
@@ -48,12 +61,17 @@ const commands = {
     if (unknown.length > 0) {
       throw new Error(`Unknown categories: ${unknown.join(', ')}`);
     }
-    const { chosen, skipped } = select(await collect(sourcesFrom(values)), {
+    const collected = await collect(sourcesFrom(values));
+    const report = coverage(values, collected);
+    const { chosen, skipped } = select(collected, {
       categories,
       exclude: csv(values.exclude),
       allowFlagged: values['allow-flagged'],
     });
-    const bundle = validateBundle(makeBundle(chosen));
+    if (!CATEGORIES.some((category) => chosen[category].length > 0)) {
+      throw new Error('No selected data to export. Check payloads, staged sources and credential exclusions.');
+    }
+    const bundle = validateBundle({ ...makeBundle(chosen), migrationWarnings: report.warnings });
     const out = path.resolve(values.out);
     await mkdir(path.dirname(out), { recursive: true });
     await writeFile(out, JSON.stringify(bundle), { mode: 0o600 });
@@ -61,6 +79,8 @@ const commands = {
       file: out,
       counts: Object.fromEntries(CATEGORIES.map((category) => [category, chosen[category].length])),
       skippedForCredentials: skipped,
+      coverage: report,
+      status: 'Bundle created; destination import is not verified',
     });
   },
 

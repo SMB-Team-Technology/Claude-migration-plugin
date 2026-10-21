@@ -2,15 +2,17 @@ import { findSecret } from './secrets.mjs';
 import { readExport, toBundleConversation, extractArtifacts, extractMemories } from './sources/export.mjs';
 import { scanSkills, defaultSkillDirs } from './sources/skills.mjs';
 import { readStaged } from './sources/staged.mjs';
+import { toProject } from './sources/projects.mjs';
 
 export const BUNDLE_FORMAT = 'claude-migration-bundle';
 export const BUNDLE_VERSION = 1;
-export const GENERATOR = { name: 'claude-migration-plugin', version: '0.1.0' };
+export const GENERATOR = { name: 'claude-migration-plugin', version: '0.2.0' };
 
-export const CATEGORIES = ['conversations', 'memories', 'skills', 'scheduledTasks', 'artifacts'];
+export const CATEGORIES = ['projects', 'conversations', 'memories', 'skills', 'scheduledTasks', 'artifacts'];
 
 const itemText = {
-  conversations: (item) => item.messages.map((message) => message.text).join('\n'),
+  projects: (item) => `${item.instructions}\n${item.context}`,
+  conversations: (item) => item.messages.map((message) => `${message.text}\n${message.thinking ?? ''}`).join('\n'),
   memories: (item) => item.value,
   skills: (item) => [item.content, ...item.files.map((file) => file.content)].join('\n'),
   scheduledTasks: (item) => item.prompt,
@@ -18,6 +20,7 @@ const itemText = {
 };
 
 const itemTitle = {
+  projects: (item) => item.name,
   conversations: (item) => item.title,
   memories: (item) => item.value.slice(0, 120),
   skills: (item) => item.name,
@@ -26,6 +29,7 @@ const itemTitle = {
 };
 
 const itemDetail = {
+  projects: (item) => item.migrationWarnings?.join(' ') ?? 'Instructions and text context only; verify files separately',
   conversations: (item) => `${item.messages.length} messages`,
   memories: () => '',
   skills: (item) => `${item.files.length} supporting file(s)`,
@@ -49,6 +53,7 @@ export const collect = async (options = {}) => {
   const exportedMemories = extractMemories(exported.memories);
   const exportedArtifacts = extractArtifacts(rawConversations);
   return {
+    projects: mergeById(staged.projects, (exported.projects ?? []).map(toProject)),
     conversations: mergeById(
       staged.conversations,
       rawConversations.map(toBundleConversation).filter((chat) => chat.messages.length > 0),
@@ -111,7 +116,7 @@ export const makeBundle = (chosen, createdAt = new Date().toISOString()) => ({
   version: BUNDLE_VERSION,
   createdAt,
   generator: GENERATOR,
-  ...Object.fromEntries(CATEGORIES.filter((category) => chosen[category].length > 0).map((c) => [c, chosen[c]])),
+  ...Object.fromEntries(CATEGORIES.filter((category) => chosen[category]?.length > 0).map((c) => [c, chosen[c]])),
 });
 
 /** Throws a readable error when `bundle` would not be accepted by the importer. */
@@ -130,7 +135,26 @@ export const validateBundle = (bundle) => {
     if (!Array.isArray(items)) {
       return [`${category} must be an array`];
     }
-    return items.flatMap((item, index) => (item?.id ? [] : [`${category}[${index}] is missing an id`]));
+    const seen = new Set();
+    return items.flatMap((item, index) => {
+      const label = `${category}[${index}]`;
+      if (typeof item?.id !== 'string' || !item.id) return [`${label} is missing an id`];
+      if (item.id.length > 300) return [`${label} id exceeds 300 characters`];
+      if (seen.has(item.id)) return [`${label} has a duplicate id`];
+      seen.add(item.id);
+      if (category === 'projects' && (!item.name?.trim() || typeof item.instructions !== 'string' || typeof item.context !== 'string')) {
+        return [`${label} requires name, instructions and context text`];
+      }
+      if (category === 'projects') {
+        if (item.name.length > 128) return [`${label} name exceeds 128 characters`];
+        if (item.instructions.length > 100_000) return [`${label} instructions exceed 100000 characters`];
+        if (item.context.length > 100_000) return [`${label} context exceeds 100000 characters`];
+      }
+      if (category === 'conversations' && item.projectId !== undefined && (typeof item.projectId !== 'string' || !item.projectId || item.projectId.length > 300)) {
+        return [`${label} projectId must be a nonempty source ID of at most 300 characters`];
+      }
+      return [];
+    });
   });
   if (problems.length > 0) {
     throw new Error(problems.join('; '));
