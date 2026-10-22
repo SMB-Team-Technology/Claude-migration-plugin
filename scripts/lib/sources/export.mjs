@@ -1,9 +1,11 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { readZip } from '../zip.mjs';
+import { isManifest, neededFiles, resolveDownloaded, manifestTime } from './manifest.mjs';
 
 const EXPORT_FILES = ['conversations.json', 'memories.json', 'projects.json'];
 const PROJECT_FILE = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.json$/i;
+const ARTIFACT_RECORD = /(?:^|\/)artifacts\/[^/]+\/artifact\.json$/;
 const isProject = (raw) => raw && !Array.isArray(raw) && typeof raw.uuid === 'string' && typeof raw.name === 'string' && Object.hasOwn(raw, 'prompt_template');
 
 const combineProjects = (aggregate, individual) => {
@@ -19,16 +21,39 @@ const combineProjects = (aggregate, individual) => {
   return aggregate !== undefined || individual.length ? projects : undefined;
 };
 
-const projectFiles = async (dir, depth = 0) => {
+/** Walks an extracted export for individual project records and published-artifact records. */
+const recordFiles = async (dir, depth = 0) => {
   if (depth > 5) throw new Error('Export folder nesting exceeds 5 levels; choose the payload folder directly');
-  const found = [];
+  const found = { projects: [], artifacts: [] };
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...await projectFiles(full, depth + 1));
-    else if (entry.isFile() && PROJECT_FILE.test(entry.name)) found.push(full);
+    if (entry.isDirectory()) {
+      const nested = await recordFiles(full, depth + 1);
+      found.projects.push(...nested.projects);
+      found.artifacts.push(...nested.artifacts);
+    } else if (entry.isFile() && PROJECT_FILE.test(entry.name)) {
+      found.projects.push(full);
+    } else if (entry.isFile() && ARTIFACT_RECORD.test(full.split(path.sep).join('/'))) {
+      found.artifacts.push(full);
+    }
   }
   return found;
 };
+
+/** Maps a `frames` artifact record to an inventory entry: what exists, not its content. */
+const toInventoryItem = (raw, label) => {
+  if (typeof raw?.id !== 'string' || !Array.isArray(raw.versions)) throw new Error(`${label} is not a published-artifact record`);
+  const active = raw.versions.find((version) => version.id === raw.active_version) ?? raw.versions.at(-1);
+  return {
+    id: raw.id,
+    kind: raw.kind ?? 'artifact',
+    title: active?.title?.trim() || 'Untitled',
+    versions: raw.versions.length,
+    ...(raw.visibility ? { visibility: raw.visibility } : {}),
+  };
+};
+
+const inventoryOf = (records) => (records.length ? records : undefined);
 
 const checkedExport = (data) => {
   if (Object.values(data).every((value) => value === undefined)) {
@@ -50,7 +75,7 @@ const parseJson = (text, label) => {
   }
 };
 
-/** Loads the JSON files of a claude.ai data export from a .zip, a folder, or a bare conversations.json. */
+/** Loads a claude.ai data export from its index (`member-manifest-….json`), a .zip, a folder, or a bare payload JSON. */
 export const readExport = async (target) => {
   const info = await stat(target);
   if (info.isDirectory()) {
@@ -58,23 +83,48 @@ export const readExport = async (target) => {
     const read = async (name) =>
       names.includes(name) ? parseJson(await readFile(path.join(target, name), 'utf8'), name) : undefined;
     const [conversations, memories, projects] = await Promise.all(EXPORT_FILES.map(read));
+    const records = await recordFiles(target);
     const individual = [];
-    for (const file of await projectFiles(target)) {
+    for (const file of records.projects) {
       const raw = parseJson(await readFile(file, 'utf8'), path.basename(file));
       if (isProject(raw)) individual.push(raw);
     }
-    return checkedExport({ conversations, memories, projects: combineProjects(projects, individual) });
+    const inventory = await Promise.all(
+      records.artifacts.map(async (file) => toInventoryItem(parseJson(await readFile(file, 'utf8'), file), file)),
+    );
+    return checkedExport({ conversations, memories, projects: combineProjects(projects, individual), artifactInventory: inventoryOf(inventory) });
   }
   if (target.toLowerCase().endsWith('.json')) {
     const name = path.basename(target).toLowerCase();
     const raw = parseJson(await readFile(target, 'utf8'), name);
     if (isProject(raw)) return { projects: [raw] };
+    if (isManifest(raw)) return fromZipEntries(await manifestEntries(target, raw));
     if (!EXPORT_FILES.includes(name)) {
-      throw new Error('Pass conversations.json, memories.json, projects.json, an individual project JSON or the actual export archive. Export indexes are not payloads.');
+      throw new Error('Pass the export index (member-manifest-….json), conversations.json, memories.json, projects.json, an individual project JSON or an export archive.');
     }
     return checkedExport({ [name.replace('.json', '')]: raw });
   }
-  const entries = readZip(await readFile(target));
+  return fromZipEntries(readZip(await readFile(target)));
+};
+
+/** Reads every archive an export index lists, from the folder the index was downloaded to. */
+const manifestEntries = async (target, manifest) => {
+  const dir = path.dirname(target);
+  const since = manifestTime(manifest);
+  const files = neededFiles(manifest);
+  const found = await Promise.all(files.map((file) => resolveDownloaded(dir, file.filename, since)));
+  const missing = files.filter((_, index) => !found[index]).map((file) => file.filename);
+  if (missing.length > 0) {
+    throw new Error(`The export index lists files that are not downloaded yet: ${missing.join(', ')}. Run the download step first.`);
+  }
+  const entries = new Map();
+  for (const [index, file] of found.entries()) {
+    for (const [name, read] of readZip(await readFile(file))) entries.set(`${files[index].filename}/${name}`, read);
+  }
+  return entries;
+};
+
+const fromZipEntries = (entries) => {
   const read = (name) => {
     const keys = [...entries.keys()].filter((entry) => entry === name || entry.endsWith(`/${name}`));
     if (keys.length > 1) {
@@ -83,12 +133,22 @@ export const readExport = async (target) => {
     return keys.length ? parseJson(entries.get(keys[0])().toString('utf8'), name) : undefined;
   };
   const individual = [];
+  const inventory = [];
   for (const [name, readEntry] of entries) {
+    if (ARTIFACT_RECORD.test(name)) {
+      inventory.push(toInventoryItem(parseJson(readEntry().toString('utf8'), name), name));
+      continue;
+    }
     if (!PROJECT_FILE.test(name.split('/').at(-1))) continue;
     const raw = parseJson(readEntry().toString('utf8'), name);
     if (isProject(raw)) individual.push(raw);
   }
-  return checkedExport({ conversations: read('conversations.json'), memories: read('memories.json'), projects: combineProjects(read('projects.json'), individual) });
+  return checkedExport({
+    conversations: read('conversations.json'),
+    memories: read('memories.json'),
+    projects: combineProjects(read('projects.json'), individual),
+    artifactInventory: inventoryOf(inventory),
+  });
 };
 
 const blockText = (message) => {

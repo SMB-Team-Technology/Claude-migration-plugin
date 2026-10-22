@@ -40,7 +40,7 @@ The claude.ai export contains **Chat-mode conversations only**. Chats run in Cow
 
 Transcripts keep user and assistant text, questions Claude asked and the answers, messages typed while Claude was working, and visible thinking. Tool calls and their results, images, hidden thinking and subagent transcripts are reported as not migrated. A session attached to a project is linked to the exported project with the same, unique name. Repeated teleports of one session are deduplicated by its `session_…` ID. Never use snippets as full conversations.
 
-Export indexes are not payloads. Download the actual archives. For separate archives, extract `projects.json`, `conversations.json` and `memories.json` into one source folder, avoiding overwrites, and pass that folder with `--export`. `scan` returns `categories` plus coverage warnings; `build` embeds those warnings for review in AIWP. A valid bundle is not proof of complete migration.
+claude.ai's **Export data** downloads an index (`member-manifest-….json`), not the data. `aiwp-migrate.mjs download` opens each listed archive's link in the logged-in browser, waits for the files in `~/Downloads`, and never outputs the links. Pass the index with `--export`, and every listed archive is read (`light_metadata` is skipped). The `frames` archive lists published artifacts: titles, kind (`page` = Docs) and version counts, but no content. `scan` uses it to report which published artifacts were not collected. Links expire after 24 hours and may be single-use; an archive older than its index is never used. `scan` returns `categories` plus coverage warnings; `build` embeds those warnings for review in AIWP. A valid bundle is not proof of complete migration.
 
 Keep originals until destination contents are verified. Existing projects/chats are not updated on retry; unrelated same-name projects are not merged. Add original files and reconnect integrations manually.
 
@@ -50,11 +50,16 @@ Requires Node 20+ and has no dependencies.
 
 ```
 npm test
-node scripts/aiwp-migrate.mjs scan --export export.zip
+node scripts/aiwp-migrate.mjs download
+node scripts/aiwp-migrate.mjs scan --export ~/Downloads/member-manifest-….json
 node scripts/aiwp-migrate.mjs build --out bundle.json --categories conversations,skills --export export.zip
 ```
 
 The bundle contract is in [docs/bundle-format.md](docs/bundle-format.md); the importer lives in AI Workforce Pro (`packages/api/src/migration`).
+
+### Export index download (0.4.0)
+
+`download` fetches an export's archives through the user's browser. `--export` accepts the index, and published artifacts missing from the bundle are reported from `frames`.
 
 ### Session transcripts (0.3.0)
 

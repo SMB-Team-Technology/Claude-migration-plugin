@@ -8,7 +8,7 @@ import { readSessions, linkSessionProjects } from './sources/sessions.mjs';
 
 export const BUNDLE_FORMAT = 'claude-migration-bundle';
 export const BUNDLE_VERSION = 1;
-export const GENERATOR = { name: 'claude-migration-plugin', version: '0.3.0' };
+export const GENERATOR = { name: 'claude-migration-plugin', version: '0.4.0' };
 
 export const CATEGORIES = ['projects', 'conversations', 'memories', 'skills', 'scheduledTasks', 'artifacts'];
 
@@ -76,6 +76,20 @@ const reconcileSessions = (chats, unread) => {
   return { chats: updated, missing };
 };
 
+/** Compares the export's published-artifact inventory with what was collected; title matching covers staged copies. */
+const inventoryWarnings = (inventory = [], artifacts) => {
+  if (inventory.length === 0) return [];
+  const ids = new Set(artifacts.map((artifact) => artifact.id));
+  const titles = new Set(artifacts.map((artifact) => artifact.title.trim().toLowerCase()));
+  const missing = inventory.filter((item) => !ids.has(item.id) && !titles.has(item.title.toLowerCase()));
+  return [
+    `The export lists ${inventory.length} published artifact(s); ${inventory.length - missing.length} matched collected artifacts.`,
+    ...missing.map((item) => (item.kind === 'page'
+      ? `Published Docs page "${item.title}" was not collected; export it through the Docs connector.`
+      : `Published artifact "${item.title}" was not collected.`)),
+  ];
+};
+
 /** Reads every source the options point at and returns the full, unfiltered set per category. */
 export const collect = async (options = {}) => {
   const exported = options.exportPath ? await readExport(options.exportPath) : {};
@@ -89,6 +103,7 @@ export const collect = async (options = {}) => {
   const projects = mergeById(staged.projects, (exported.projects ?? []).map(toProject));
   const exportedMemories = extractMemories(exported.memories);
   const exportedArtifacts = extractArtifacts(rawConversations);
+  const artifacts = [...staged.artifacts, ...exportedArtifacts];
   return {
     projects,
     conversations: mergeById(
@@ -98,8 +113,8 @@ export const collect = async (options = {}) => {
     memories: [...staged.memories, ...exportedMemories],
     skills: options.skipLocalSkills ? [] : await scanSkills(skillRoots),
     scheduledTasks: staged.scheduledTasks,
-    artifacts: [...staged.artifacts, ...exportedArtifacts],
-    sourceWarnings: sessions.missing,
+    artifacts,
+    sourceWarnings: [...sessions.missing, ...inventoryWarnings(exported.artifactInventory, artifacts)],
   };
 };
 

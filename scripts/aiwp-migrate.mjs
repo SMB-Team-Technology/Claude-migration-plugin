@@ -2,9 +2,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { homedir } from 'node:os';
 import { CATEGORIES, collect, summarize, select, makeBundle, validateBundle } from './lib/bundle.mjs';
+import { downloadExport } from './lib/download.mjs';
 
 const USAGE = `Usage:
+  aiwp-migrate.mjs download [--manifest <member-manifest-….json>] [--dir <folder, default ~/Downloads>] [--wait <seconds>]
   aiwp-migrate.mjs scan  [--export <zip|dir|json>] [--inputs <dir>] [--session <jsonl|dir>]... [--skills-dir <dir>]...
   aiwp-migrate.mjs build --out <file> [--categories a,b] [--exclude id,id] [--allow-flagged]
                          [--export ...] [--inputs ...] [--session ...] [--skills-dir ...]
@@ -22,6 +25,9 @@ const options = {
   exclude: { type: 'string' },
   'allow-flagged': { type: 'boolean' },
   out: { type: 'string' },
+  manifest: { type: 'string' },
+  dir: { type: 'string' },
+  wait: { type: 'string' },
 };
 
 const csv = (value) => (value ? value.split(',').map((part) => part.trim()).filter(Boolean) : undefined);
@@ -51,6 +57,18 @@ const coverage = (values, collected) => ({
 });
 
 const commands = {
+  async download(values) {
+    const waitSeconds = values.wait ? Number(values.wait) : undefined;
+    if (waitSeconds !== undefined && !(waitSeconds >= 0)) {
+      throw new Error('--wait must be a number of seconds');
+    }
+    print(await downloadExport({
+      dir: path.resolve(values.dir ?? path.join(homedir(), 'Downloads')),
+      manifestPath: values.manifest ? path.resolve(values.manifest) : undefined,
+      waitSeconds,
+    }));
+  },
+
   async scan(values) {
     const collected = await collect(sourcesFrom(values));
     print({ categories: summarize(collected), coverage: coverage(values, collected) });

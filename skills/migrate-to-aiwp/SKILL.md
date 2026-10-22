@@ -17,12 +17,21 @@ Ask which of these the user wants to migrate (multi-select): **Projects, Chats, 
 |---|---|
 | Projects | Read `projects.json` from the actual export, or stage `$WORK/inputs/projects.json` from a verified source. Preserve stable IDs, names, instructions and text context. Do not guess local storage paths. Project files are not migrated in this version; report them and ask the user to add originals in AIWP. |
 | Chats | **Try your own chat-history tools first** (for example tools that list recent chats or search/fetch past conversations). If you have them, gather the chats and write `$WORK/inputs/conversations.json` (below). If you have no such tool, or it cannot return full messages, use the data export instead. |
-| Chats, Artifacts (export) | The claude.ai data export. Ask for the path to the `.zip` (or extracted folder). If they do not have one: claude.ai → Settings → Privacy → **Export data**; the download link is emailed and may take a while. Artifacts are rebuilt from the chats in that export. Offer the export when the tool route is partial, but do not claim it includes desktop-local Cowork projects or sessions. An emailed index is not the payload; obtain the separate actual archives. The helper accepts one export path; for separate archives extract their payload JSON files into a common source folder without overwriting duplicates, then pass that folder. |
+| Chats, Projects, Artifacts (export) | The claude.ai data export; see "Getting the export" below. It holds Chat-mode chats, project records and the list of published artifacts. It does **not** hold Cowork or Code chats, and it has no artifact content. |
 | Chats (Cowork and Code sessions) | **Not in the claude.ai export**, which holds Chat-mode conversations only, even for chats inside a cloud project. Collect them as session transcripts; see "Cowork and Code sessions" below. |
 | Skills | Read from `~/.claude/skills` automatically. Ask whether there are other skill folders; pass each with `--skills-dir`. |
 | Memories | Only you can read these. Write them to `$WORK/inputs/memories.json` (below). |
 | Scheduled tasks | Only you can read these. List them with whichever scheduled-task tool you have (for example a scheduled-tasks or cron list tool), then write `$WORK/inputs/scheduled-tasks.json`. |
 | Extra artifacts | If you have a tool that lists the user's published artifacts, read their content and add them to `$WORK/inputs/artifacts.json`. Skip this if you have no such tool. |
+
+### Getting the export
+
+1. Ask the user to open claude.ai → **Settings → Privacy → Export data** and wait for it to finish. The browser downloads one small file, `member-manifest-….json`. This is an index of download links, not the data. If several are in Downloads, the newest is used. Suggest the user requests only one export.
+2. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/aiwp-migrate.mjs" download`. It finds the newest index in `~/Downloads`, opens each data file's link in the user's browser (which is already logged in), and waits until the files arrive. The user may see download prompts in the browser; ask them to allow them. Report the result in plain words, for example "✅ conversations, ✅ projects, ✅ frames". `light_metadata` holds account details and is skipped.
+3. If the status is `expired` or `incomplete`, tell the user what its `next` text says. Links expire 24 hours after the export and may work only once, so a new export is usually the fix.
+4. Pass the index file itself to scan/build as `--export "<manifest path from the result>"`. Never unzip, move or merge the archives.
+
+Never print, paste or log the download links. The helper never outputs them either.
 
 ### Cowork and Code sessions
 

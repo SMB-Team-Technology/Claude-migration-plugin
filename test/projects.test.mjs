@@ -43,7 +43,7 @@ test('rejects export indexes, missing payloads and ambiguous archives', async ()
   const dir = await workspace();
   const index = path.join(dir, 'export-index.json');
   await writeFile(index, JSON.stringify({ files: ['conversations.zip'] }));
-  await assert.rejects(readExport(index), /indexes are not payloads/);
+  await assert.rejects(readExport(index), /Pass the export index/);
   const empty = path.join(dir, 'empty');
   await mkdir(empty);
   await assert.rejects(readExport(empty), /No export payload/);

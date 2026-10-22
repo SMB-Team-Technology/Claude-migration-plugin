@@ -9,7 +9,7 @@ Every category is optional and omitted when empty. Every item has an `id` that i
   "format": "claude-migration-bundle",
   "version": 1,
   "createdAt": "2026-10-19T12:00:00.000Z",
-  "generator": { "name": "claude-migration-plugin", "version": "0.3.0" },
+  "generator": { "name": "claude-migration-plugin", "version": "0.4.0" },
 
   "migrationWarnings": ["Local Cowork coverage must be verified separately"],
   "projects": [{ "id": "project-uuid", "name": "Client", "description": "Migration", "instructions": "…", "context": "…" }],
