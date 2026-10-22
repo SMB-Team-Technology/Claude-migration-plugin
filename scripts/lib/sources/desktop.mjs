@@ -1,9 +1,30 @@
-import { open, readFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const FETCH_SCRIPT = fileURLToPath(new URL('../../fetch.exp', import.meta.url));
 export const PENDING_FILE = 'pending-sessions.txt';
+export const KNOWN_FILE = 'known-sessions.txt';
+const SESSION_REF = /\b(?:cse|session)_([A-Za-z0-9]{10,})\b/g;
+
+/** Every Cowork session in pasted text (claude.ai/cowork/cse_… links or session IDs), as teleport IDs (`session_…`). */
+export const extractSessionIds = (text) => [...new Set([...String(text).matchAll(SESSION_REF)].map((match) => `session_${match[1]}`))];
+
+const teleportFolderOf = (home) => path.join(home, 'aiwp-migration', 'cowork');
+
+const readKnown = async (folder) => extractSessionIds(await readFile(path.join(folder, KNOWN_FILE), 'utf8').catch(() => ''));
+
+/** Remembers Cowork sessions found outside the folder index (for example pasted links), so later runs include them. */
+export const addKnownSessions = async (home, text) => {
+  const folder = teleportFolderOf(home);
+  const known = await readKnown(folder);
+  const added = extractSessionIds(text).filter((id) => !known.includes(id));
+  if (added.length > 0) {
+    await mkdir(folder, { recursive: true });
+    await writeFile(path.join(folder, KNOWN_FILE), `${[...known, ...added].join('\n')}\n`);
+  }
+  return { added: added.length, total: known.length + added.length };
+};
 const EXPECT = '/usr/bin/expect';
 
 const exists = (file) => stat(file).then(() => true, () => false);
@@ -96,7 +117,7 @@ export const fetchAllCommand = ({ teleportFolder, claude, expect = EXPECT, scrip
  * from the desktop app's session indexes. Reads only those fields; never app storage or credentials.
  */
 export const listSessions = async ({ home, appDir = path.join(home, 'Library', 'Application Support', 'Claude'), configDir = path.join(home, '.claude') }) => {
-  const teleportFolder = path.join(home, 'aiwp-migration', 'cowork');
+  const teleportFolder = teleportFolderOf(home);
   const transcripts = path.join(configDir, 'projects', projectSlug(teleportFolder));
   const fetched = await fetchedTranscripts(path.join(configDir, 'projects'));
   const claude = await findDesktopClaude(appDir);
@@ -105,15 +126,18 @@ export const listSessions = async ({ home, appDir = path.join(home, 'Library', '
     (await orgDirs(path.join(appDir, 'local-agent-mode-sessions'))).map((dir) => readJson(path.join(dir, 'remote-session-spaces.json'))),
   );
   const seen = new Set();
-  const cowork = spaces
+  const indexed = spaces
     .flatMap((file) => (Array.isArray(file?.entries) ? file.entries : []))
-    .filter((entry) => typeof entry?.sessionId === 'string' && /^session_[A-Za-z0-9]+$/.test(entry.sessionId) && !seen.has(entry.sessionId) && seen.add(entry.sessionId))
+    .filter((entry) => typeof entry?.sessionId === 'string' && /^session_[A-Za-z0-9]+$/.test(entry.sessionId))
+    .map((entry) => ({ id: entry.sessionId, source: 'folder', folders: (entry.folders ?? []).filter((folder) => typeof folder === 'string') }));
+  const added = (await readKnown(teleportFolder)).map((id) => ({ id, source: 'added', folders: [] }));
+  const cowork = [...indexed, ...added]
+    .filter((entry) => !seen.has(entry.id) && seen.add(entry.id))
     .map((entry) => ({
-      id: entry.sessionId,
-      folders: (entry.folders ?? []).filter((folder) => typeof folder === 'string'),
-      collected: fetched.has(entry.sessionId),
-      transcript: fetched.get(entry.sessionId)?.file ?? null,
-      ...(claude ? { command: `mkdir -p ${shellQuote(teleportFolder)} && cd ${shellQuote(teleportFolder)} && ${shellQuote(claude)} --teleport ${entry.sessionId}` } : {}),
+      ...entry,
+      collected: fetched.has(entry.id),
+      transcript: fetched.get(entry.id)?.file ?? null,
+      ...(claude ? { command: `mkdir -p ${shellQuote(teleportFolder)} && cd ${shellQuote(teleportFolder)} && ${shellQuote(claude)} --teleport ${entry.id}` } : {}),
     }));
 
   const code = [];
@@ -139,7 +163,7 @@ export const listSessions = async ({ home, appDir = path.join(home, 'Library', '
     transcripts,
     cowork,
     code,
-    coverage: 'Cowork chats are listed only when they have a linked folder. Compare with each project in the desktop app and add any others to sessions.json by id.',
+    coverage: 'Cowork chats are found automatically only when they have a linked folder. Add the others from the claude.ai Cowork list with `sessions --add` (links or session IDs).',
     ...(claude ? {} : { notice: 'The Claude desktop app’s built-in command-line tool was not found, so Cowork sessions cannot be collected on this computer.' }),
   };
 };

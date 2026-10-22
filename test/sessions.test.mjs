@@ -82,7 +82,7 @@ test('collects session folders, links projects by unique name and keeps the newe
   await writeFile(path.join(exportDir, `${project.uuid}.json`), JSON.stringify(project));
   await writeFile(path.join(dir, 'a.jsonl'), jsonl(teleported(8)));
   await writeFile(path.join(dir, 'b.jsonl'), `${jsonl(teleported(9))}\n{"type":"trunc`);
-  const data = await collect({ exportPath: exportDir, sessionPaths: [dir], skipLocalSkills: true });
+  const data = await collect({ exportPath: exportDir, sessionPaths: [dir], skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(data.conversations.length, 1);
   const [chat] = data.conversations;
   assert.equal(chat.projectId, project.uuid);
@@ -98,10 +98,10 @@ test('ambiguous or missing project names leave the chat standalone with a reason
     { id: 'p1', name: 'Synthetic project' },
     { id: 'p2', name: 'Synthetic project' },
   ]));
-  const ambiguous = await collect({ inputsDir: dir, sessionPaths: [path.join(dir, 's.jsonl')], skipLocalSkills: true });
+  const ambiguous = await collect({ inputsDir: dir, sessionPaths: [path.join(dir, 's.jsonl')], skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(ambiguous.conversations[0].projectId, undefined);
   assert.match(ambiguous.conversations[0].migrationWarnings.at(-1), /several projects share that name/);
-  const missing = await collect({ sessionPaths: [path.join(dir, 's.jsonl')], skipLocalSkills: true });
+  const missing = await collect({ sessionPaths: [path.join(dir, 's.jsonl')], skipLocalSkills: true, skipLocalMemories: true });
   assert.match(missing.conversations[0].migrationWarnings.at(-1), /not in this bundle/);
 });
 
@@ -114,7 +114,7 @@ test('sessions.json supplies titles and project ids and reports expected session
     { id: 'session_01NotFetched', title: 'One-page document' },
     { path: 'missing.jsonl', title: 'Lost session' },
   ]));
-  const data = await collect({ inputsDir: dir, skipLocalSkills: true });
+  const data = await collect({ inputsDir: dir, skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(data.conversations.length, 1);
   assert.equal(data.conversations[0].title, 'Test data setup');
   assert.equal(data.conversations[0].projectId, 'p1');
@@ -128,7 +128,7 @@ test('sessions.json supplies titles and project ids and reports expected session
 test('a corrupt line before the end of a transcript is rejected rather than skipped', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'sessions-'));
   await writeFile(path.join(dir, 'bad.jsonl'), `{"broken\n${jsonl(desktop)}`);
-  await assert.rejects(collect({ sessionPaths: [dir], skipLocalSkills: true }), /bad\.jsonl line 1 is not valid JSON/);
+  await assert.rejects(collect({ sessionPaths: [dir], skipLocalSkills: true, skipLocalMemories: true }), /bad\.jsonl line 1 is not valid JSON/);
 });
 
 test('sessions.json entries match transcripts passed by folder through their session id', async () => {
@@ -140,7 +140,7 @@ test('sessions.json entries match transcripts passed by folder through their ses
     { id: 'session_01SyntheticRemote', title: 'Harlow & Pike test data setup' },
     { id: 'session_01NotFetched', title: 'One-page personal document' },
   ]));
-  const data = await collect({ inputsDir: dir, sessionPaths: [teleports], skipLocalSkills: true });
+  const data = await collect({ inputsDir: dir, sessionPaths: [teleports], skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(data.conversations[0].title, 'Harlow & Pike test data setup');
   assert.match(data.conversations[0].migrationWarnings.at(-1), /"Synthetic project", which is not in this bundle/);
   assert.deepEqual(data.sourceWarnings, ['Expected session "One-page personal document" (session_01NotFetched) was not collected: no transcript was staged.']);
@@ -150,7 +150,7 @@ test('sessions.json entries without a title keep the chat title from the transcr
   const dir = await mkdtemp(path.join(tmpdir(), 'sessions-'));
   await writeFile(path.join(dir, 't.jsonl'), jsonl(teleported()));
   await writeFile(path.join(dir, 'sessions.json'), JSON.stringify([{ id: 'session_01SyntheticRemote' }, { id: 'session_01Missing' }]));
-  const data = await collect({ inputsDir: dir, sessionPaths: [path.join(dir, 't.jsonl')], skipLocalSkills: true });
+  const data = await collect({ inputsDir: dir, sessionPaths: [path.join(dir, 't.jsonl')], skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(data.conversations[0].title, 'Create fictional test files');
   assert.deepEqual(data.sourceWarnings, ['Expected session "session_01Missing" was not collected: no transcript was staged.']);
 });

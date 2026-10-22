@@ -11,7 +11,7 @@ set handle [open $list r]
 set ids {}
 foreach line [split [read $handle] "\n"] {
   set line [string trim $line]
-  if {[regexp {^session_[A-Za-z0-9]+$} $line]} { lappend ids $line }
+  if {[regexp {^(?:session|cse)_[A-Za-z0-9]+$} $line]} { lappend ids $line }
 }
 close $handle
 

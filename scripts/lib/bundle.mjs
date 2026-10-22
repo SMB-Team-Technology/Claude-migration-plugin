@@ -2,13 +2,14 @@ import { stat } from 'node:fs/promises';
 import { findSecret } from './secrets.mjs';
 import { readExport, toBundleConversation, extractArtifacts, extractMemories } from './sources/export.mjs';
 import { scanSkills, defaultSkillDirs } from './sources/skills.mjs';
+import { scanMemories } from './sources/memory.mjs';
 import { readStaged } from './sources/staged.mjs';
 import { toProject } from './sources/projects.mjs';
 import { readSessions, linkSessionProjects } from './sources/sessions.mjs';
 
 export const BUNDLE_FORMAT = 'claude-migration-bundle';
 export const BUNDLE_VERSION = 1;
-export const GENERATOR = { name: 'claude-migration-plugin', version: '0.6.0' };
+export const GENERATOR = { name: 'claude-migration-plugin', version: '0.7.0' };
 
 export const CATEGORIES = ['projects', 'conversations', 'memories', 'skills', 'scheduledTasks', 'artifacts'];
 
@@ -30,11 +31,13 @@ const itemTitle = {
   artifacts: (item) => item.title,
 };
 
+const ORIGIN_LABELS = { mine: 'Yours', team: 'From your team', claude: 'Claude built-in (left out unless included)' };
+
 const itemDetail = {
   projects: (item) => item.migrationWarnings?.join(' ') ?? 'Instructions and text context only; verify files separately',
   conversations: (item) => `${item.messages.length} messages`,
   memories: () => '',
-  skills: (item) => `${item.files.length} supporting file(s)`,
+  skills: (item) => `${ORIGIN_LABELS[item.origin] ?? 'Yours'} · ${item.files.length} supporting file(s)`,
   scheduledTasks: (item) => item.cron ?? item.runAt ?? '',
   artifacts: (item) => item.type,
 };
@@ -109,7 +112,7 @@ export const collect = async (options = {}) => {
       mergeById(staged.conversations, linkSessionProjects(sessions.chats, projects)),
       rawConversations.map(toBundleConversation).filter((chat) => chat.messages.length > 0),
     ),
-    memories: [...staged.memories, ...exportedMemories],
+    memories: mergeById(staged.memories, [...(options.skipLocalMemories ? [] : await scanMemories(options.projectsDir)), ...exportedMemories]),
     skills: options.skipLocalSkills ? [] : await scanSkills(skillRoots),
     scheduledTasks: staged.scheduledTasks,
     artifacts,
@@ -139,7 +142,7 @@ export const summarize = (collected) =>
  * drops individual ids. Items that look like they contain credentials are left
  * out unless `allowFlagged` is set.
  */
-export const select = (collected, { categories = CATEGORIES, exclude = [], allowFlagged = false } = {}) => {
+export const select = (collected, { categories = CATEGORIES, exclude = [], allowFlagged = false, includeBuiltinSkills = false } = {}) => {
   const excluded = new Set(exclude);
   const skipped = [];
   const chosen = Object.fromEntries(
@@ -148,7 +151,7 @@ export const select = (collected, { categories = CATEGORIES, exclude = [], allow
         return [category, []];
       }
       const items = collected[category].filter((item) => {
-        if (excluded.has(item.id)) {
+        if (excluded.has(item.id) || (category === 'skills' && item.origin === 'claude' && !includeBuiltinSkills)) {
           return false;
         }
         const secret = allowFlagged ? null : findSecret(itemText[category](item));
@@ -168,7 +171,12 @@ export const makeBundle = (chosen, createdAt = new Date().toISOString()) => ({
   version: BUNDLE_VERSION,
   createdAt,
   generator: GENERATOR,
-  ...Object.fromEntries(CATEGORIES.filter((category) => chosen[category]?.length > 0).map((c) => [c, chosen[c]])),
+  ...Object.fromEntries(
+    CATEGORIES.filter((category) => chosen[category]?.length > 0).map((c) => [
+      c,
+      c === 'skills' ? chosen[c].map(({ origin, ...skill }) => skill) : chosen[c],
+    ]),
+  ),
 });
 
 /** Throws a readable error when `bundle` would not be accepted by the importer. */

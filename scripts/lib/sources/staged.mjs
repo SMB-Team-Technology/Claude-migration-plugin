@@ -20,8 +20,14 @@ const readOptional = async (dir, name) => {
 
 const asList = (raw, key) => (Array.isArray(raw) ? raw : (raw?.[key] ?? []));
 
+/** Cloud routines report `CRON_TZ=<zone> <5 fields>`; AIWP wants the schedule and the zone separately. */
+const splitCronZone = (value) => {
+  const match = typeof value === 'string' ? value.trim().match(/^CRON_TZ=(\S+)\s+(.+)$/) : null;
+  return match ? { cron: match[2].trim(), zone: match[1] } : { cron: value, zone: undefined };
+};
+
 const toTask = (task, index) => {
-  const cron = task.cron ?? task.cronExpression ?? task.cron_expression;
+  const { cron, zone } = splitCronZone(task.cron ?? task.cronExpression ?? task.cron_expression);
   const runAt = task.runAt ?? task.run_once_at ?? task.fireAt;
   return {
     id: String(task.id ?? task.taskId ?? `task-${index + 1}`),
@@ -30,7 +36,7 @@ const toTask = (task, index) => {
     scheduleType: cron ? 'recurring' : 'once',
     ...(cron ? { cron } : {}),
     ...(!cron && runAt ? { runAt } : {}),
-    timezone: task.timezone ?? task.tz ?? 'UTC',
+    timezone: task.timezone ?? task.tz ?? zone ?? 'UTC',
     enabled: task.enabled !== false,
   };
 };

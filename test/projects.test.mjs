@@ -20,7 +20,7 @@ test('projects and linked chats can be staged without inventing local storage pa
   await writeFile(path.join(dir, 'conversations.json'), JSON.stringify([
     { id: 'c1', projectId: 'p1', messages: [{ role: 'user', text: 'Question' }] },
   ]));
-  const data = await collect({ inputsDir: dir, skipLocalSkills: true });
+  const data = await collect({ inputsDir: dir, skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(data.projects[0].context, 'Reference');
   assert.match(data.projects[0].migrationWarnings[0], /files were not migrated/);
   assert.equal(data.conversations[0].projectId, 'p1');
@@ -34,7 +34,7 @@ test('reads an explicit projects payload and preserves cloud project relationshi
     'projects.json': JSON.stringify([{ uuid: 'p1', name: 'Client', prompt_template: 'Instructions', docs: [{ name: 'doc' }] }]),
     'conversations.json': JSON.stringify([{ uuid: 'c1', name: 'Chat', project_uuid: 'p1', chat_messages: [{ sender: 'human', text: 'hello' }] }]),
   }));
-  const data = await collect({ exportPath: zip, skipLocalSkills: true });
+  const data = await collect({ exportPath: zip, skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(data.projects[0].instructions, 'Instructions');
   assert.equal(data.conversations[0].projectId, 'p1');
 });
@@ -55,7 +55,7 @@ test('rejects export indexes, missing payloads and ambiguous archives', async ()
 test('rejects malformed project records and duplicate IDs', async () => {
   const dir = await workspace();
   await writeFile(path.join(dir, 'projects.json'), JSON.stringify([{ name: 'No stable ID' }]));
-  await assert.rejects(collect({ inputsDir: dir, skipLocalSkills: true }), /stable id/);
+  await assert.rejects(collect({ inputsDir: dir, skipLocalSkills: true, skipLocalMemories: true }), /stable id/);
   assert.throws(() => validateBundle({ format: 'claude-migration-bundle', version: 1, projects: [
     { id: 'p', name: 'One', instructions: '', context: '' },
     { id: 'p', name: 'Two', instructions: '', context: '' },
@@ -76,7 +76,7 @@ test('scans thinking and project context for credentials', async () => {
   const secret = 'sk-ant-abcdefghijklmnopqrstuvwxyz123456';
   await writeFile(path.join(dir, 'projects.json'), JSON.stringify([{ id: 'p', name: 'Client', context: secret }]));
   await writeFile(path.join(dir, 'conversations.json'), JSON.stringify([{ id: 'c', messages: [{ role: 'assistant', text: 'hello', thinking: secret }] }]));
-  const { chosen, skipped } = select(await collect({ inputsDir: dir, skipLocalSkills: true }));
+  const { chosen, skipped } = select(await collect({ inputsDir: dir, skipLocalSkills: true, skipLocalMemories: true }));
   assert.equal(chosen.projects.length, 0);
   assert.equal(chosen.conversations.length, 0);
   assert.equal(skipped.length, 2);
@@ -86,10 +86,10 @@ test('build reports coverage, carries warnings and refuses an empty bundle', asy
   const dir = await workspace();
   const projects = path.join(dir, 'projects.json');
   await writeFile(projects, JSON.stringify([{ id: 'p1', name: 'Client' }]));
-  const { stdout } = await run('node', ['scripts/aiwp-migrate.mjs', 'build', '--export', projects, '--no-local-skills', '--out', path.join(dir, 'bundle.json')]);
+  const { stdout } = await run('node', ['scripts/aiwp-migrate.mjs', 'build', '--export', projects, '--no-local-skills', '--no-local-memories', '--out', path.join(dir, 'bundle.json')]);
   const result = JSON.parse(stdout);
   assert.equal(result.counts.projects, 1);
   assert.equal(result.coverage.verifiedAtDestination, false);
   assert.match(result.coverage.warnings[0], /Cowork/);
-  await assert.rejects(run('node', ['scripts/aiwp-migrate.mjs', 'build', '--no-local-skills', '--out', path.join(dir, 'empty.json')]), /No selected data/);
+  await assert.rejects(run('node', ['scripts/aiwp-migrate.mjs', 'build', '--no-local-skills', '--no-local-memories', '--out', path.join(dir, 'empty.json')]), /No selected data/);
 });

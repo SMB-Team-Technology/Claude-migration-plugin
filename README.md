@@ -39,10 +39,10 @@ In a new Code-tab session, type `/claude-migration:migrate` (or ask Claude to "m
 |---|---|
 | Projects | Names, descriptions, instructions and text context from explicit export/staged records. Requires the updated AIWP importer. Original project files are not migrated. |
 | Chats | Text and thinking. Attachments and images are not included. |
-| Memories | Imported as separate facts. |
+| Memories | Claude Code memory files, one per memory, labelled by project. claude.ai account memory only when Claude has a tool to read it. |
 | Skills | `SKILL.md` plus text supporting files in the bundle. AIWP currently imports the `SKILL.md`. |
 | Scheduled tasks | Arrive paused in AIWP; connectors they relied on must be reconnected. |
-| Artifacts | Final version of each artifact in your chat export. |
+| Artifacts | Published HTML pages and Docs (via the Docs connector), checked against the export's list of published artifacts. |
 
 ## Coverage and local Cowork data
 
@@ -69,6 +69,15 @@ node scripts/aiwp-migrate.mjs build --out bundle.json --categories conversations
 ```
 
 The bundle contract is in [docs/bundle-format.md](docs/bundle-format.md); the importer lives in AI Workforce Pro (`packages/api/src/migration`).
+
+### Complete local collection (0.7.0)
+
+- Cowork chats without a linked folder are added from the claude.ai Cowork list (read with Claude in Chrome, or pasted links/session IDs) with `sessions --add`/`--add-file`, and remembered for later runs.
+- Skills include the desktop app's synced skills, labelled Yours / From your team / Claude built-in. Built-ins are left out unless `--include-builtin-skills`.
+- Claude Code memory files are read automatically (one memory per file, verbatim, labelled by project; `MEMORY.md` indexes skipped). Use `--no-local-memories` to skip them.
+- Cloud routine schedules (`CRON_TZ=<zone> <cron>`) are split into cron and timezone.
+- Chat titles skip slash commands and answers to Claude's questions.
+- The work folder is `~/aiwp-migration`, the bundle goes to `~/Downloads`, and `build` refuses to save a bundle inside a git repository.
 
 ### One-paste Cowork fetch (0.6.0)
 

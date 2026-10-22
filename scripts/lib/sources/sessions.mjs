@@ -52,6 +52,7 @@ const questionText = (input) =>
 /** Collects user and assistant turns from Claude Code / Cowork transcript rows, reporting what was left out. */
 const readTurns = (rows) => {
   const messages = [];
+  const answers = new WeakSet();
   const omitted = { tools: new Map(), hiddenThinking: 0, images: 0, localCommands: 0, sidechain: 0, compacted: false };
   let assistant = null;
 
@@ -90,6 +91,7 @@ const readTurns = (rows) => {
       const { content } = row.message;
       if (row.toolUseResult?.answers && typeof row.toolUseResult.answers === 'object') {
         pushUser(answerText(row.toolUseResult), row.timestamp);
+        if (messages.at(-1)?.role === 'user') answers.add(messages.at(-1));
         continue;
       }
       const parts = userText(Array.isArray(content) || typeof content === 'string' ? content : []).map(cleanText).filter(Boolean);
@@ -124,10 +126,14 @@ const readTurns = (rows) => {
     }
   }
 
-  const kept = messages
-    .filter((message) => message.text.trim() || message.thinking?.trim())
-    .map(({ thinking, ...message }) => (thinking ? { ...message, thinking } : message));
-  return { messages: kept, omitted };
+  const kept = messages.filter((message) => message.text.trim() || message.thinking?.trim());
+  const own = kept.filter((message) => message.role === 'user' && !answers.has(message));
+  const typed = own.find((message) => !message.text.startsWith('/')) ?? own[0];
+  return {
+    messages: kept.map(({ thinking, ...message }) => (thinking ? { ...message, thinking } : message)),
+    firstTyped: typed?.text,
+    omitted,
+  };
 };
 
 const warningsFor = (omitted) => {
@@ -156,11 +162,11 @@ const firstMatch = (rows, find) => {
 /** Maps one Claude Code or Cowork session transcript (JSONL rows) to the bundle's conversation shape. */
 export const toSessionConversation = (allRows, overrides = {}) => {
   const rows = remoteRows(allRows);
-  const { messages, omitted } = readTurns(rows);
+  const { messages, firstTyped, omitted } = readTurns(rows);
   const remoteId = firstMatch(rows, (row) => row.attachment?.type === 'remote_session_change' && row.attachment.url?.match(REMOTE_ID)?.[0]);
   const id = overrides.id ?? remoteId ?? firstMatch(rows, (row) => row.sessionId);
   const customTitle = rows.filter((row) => row.type === 'custom-title' && row.customTitle).at(-1)?.customTitle;
-  const firstPrompt = messages.find((message) => message.role === 'user')?.text.split('\n')[0].slice(0, TITLE_LENGTH);
+  const firstPrompt = firstTyped?.split('\n')[0].slice(0, TITLE_LENGTH);
   const projectName = firstMatch(rows, (row) => row.attachment?.context?.attachedProject?.match(ATTACHED_PROJECT)?.[1]);
   const timestamps = rows
     .filter((row) => row.type === 'user' || row.type === 'assistant')

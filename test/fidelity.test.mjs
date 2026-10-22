@@ -20,7 +20,7 @@ test('loads individual project JSON directly, in folders and in zip archives', a
   const zip = path.join(tmpdir(), `fidelity-${Date.now()}.zip`);
   await writeFile(zip, makeZip({ [`projects/${uuid}.json`]: JSON.stringify(project), 'users.json': '[]' }));
   for (const exportPath of [file, dir, zip]) {
-    const data = await collect({ exportPath, skipLocalSkills: true });
+    const data = await collect({ exportPath, skipLocalSkills: true, skipLocalMemories: true });
     assert.equal(data.projects[0].description, 'Migration');
     assert.equal(data.projects[0].instructions, '');
     assert.equal(data.projects[0].context, '');
@@ -73,6 +73,6 @@ test('description credentials are excluded by the default secret scan', async ()
   const dir = await mkdtemp(path.join(tmpdir(), 'description-'));
   const file = path.join(dir, `${uuid}.json`);
   await writeFile(file, JSON.stringify({ ...project, description: 'sk-ant-abcdefghijklmnopqrstuvwxyz123456' }));
-  const data = await collect({ exportPath: file, skipLocalSkills: true });
+  const data = await collect({ exportPath: file, skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(select(data).chosen.projects.length, 0);
 });

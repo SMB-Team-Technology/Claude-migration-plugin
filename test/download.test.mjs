@@ -120,7 +120,7 @@ test('files that never arrive are reported as incomplete', async () => {
 test('published artifacts the bundle lacks are reported, with Docs guidance', async () => {
   const { dir, index } = await folderWithIndex();
   for (const [name, data] of Object.entries(archives)) await writeFile(path.join(dir, name), data);
-  const data = await collect({ exportPath: index, skipLocalSkills: true });
+  const data = await collect({ exportPath: index, skipLocalSkills: true, skipLocalMemories: true });
   assert.deepEqual(data.sourceWarnings, [
     'The export lists 3 published artifact(s); 1 matched collected artifacts.',
     'Published Docs page "Team handbook" was not collected; export it through the Docs connector.',

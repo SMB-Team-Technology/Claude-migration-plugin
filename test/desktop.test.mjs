@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { listSessions, projectSlug, fetchAllCommand, FETCH_SCRIPT } from '../scripts/lib/sources/desktop.mjs';
+import { listSessions, projectSlug, fetchAllCommand, FETCH_SCRIPT, extractSessionIds, addKnownSessions } from '../scripts/lib/sources/desktop.mjs';
 
 const write = async (file, text) => {
   await mkdir(path.dirname(file), { recursive: true });
@@ -19,6 +19,7 @@ const desktopHome = async () => {
   await write(path.join(app, 'local-agent-mode-sessions', 'acct', 'org', 'remote-session-spaces.json'), JSON.stringify({ entries: [
     { sessionId: 'session_01Alpha', folders: ['/Users/x/Client'] },
     { sessionId: 'session_01Beta', folders: [] },
+    { sessionId: 'session_01DeltaLong00', folders: ['/Users/x/Delta'] },
     { sessionId: 'session_01Alpha', folders: ['/Users/x/Client'] },
     { sessionId: 'not a session; rm -rf ~', folders: [] },
   ] }));
@@ -47,6 +48,7 @@ test('lists Cowork sessions with paste-ready commands for the bundled claude, an
   assert.deepEqual(result.cowork.map((item) => [item.id, item.collected, item.transcript && path.basename(item.transcript)]), [
     ['session_01Alpha', false, null],
     ['session_01Beta', true, 'old.jsonl'],
+    ['session_01DeltaLong00', false, null],
   ]);
   const [first] = result.cowork;
   assert.match(first.command, /^mkdir -p '.*aiwp-migration\/cowork' && cd '.*' && '.*claude' --teleport session_01Alpha$/);
@@ -74,4 +76,25 @@ test('one paste-ready command fetches every pending chat with built-in tools onl
     `mkdir -p '/Users/o'\\''neil/aiwp-migration/cowork' && cd '/Users/o'\\''neil/aiwp-migration/cowork' && '/usr/bin/expect' '${FETCH_SCRIPT}' '/Apps/Claude Support/claude' pending-sessions.txt`,
   );
   assert.match(FETCH_SCRIPT, /scripts\/fetch\.exp$/);
+});
+
+test('pasted claude.ai Cowork links and session IDs become teleport IDs, once each', () => {
+  assert.deepEqual(extractSessionIds(`EOS https://claude.ai/cowork/cse_012pPS4y44McBUr6vzygBVon
+Connectors session_01AbCdEfGhIjKlMn and again claude.ai/cowork/cse_012pPS4y44McBUr6vzygBVon; noise cse_short session_; rm -rf ~`), [
+    'session_012pPS4y44McBUr6vzygBVon',
+    'session_01AbCdEfGhIjKlMn',
+  ]);
+});
+
+test('added sessions are remembered, listed with folder-index sessions and not duplicated', async () => {
+  const { home } = await desktopHome();
+  assert.deepEqual(await addKnownSessions(home, 'https://claude.ai/cowork/cse_01Gamma0000000 cse_01DeltaLong00'), { added: 2, total: 2 });
+  assert.deepEqual(await addKnownSessions(home, 'cse_01Gamma0000000'), { added: 0, total: 2 });
+  const result = await listSessions({ home });
+  assert.deepEqual(result.cowork.map((item) => [item.id, item.source]), [
+    ['session_01Alpha', 'folder'],
+    ['session_01Beta', 'folder'],
+    ['session_01DeltaLong00', 'folder'],
+    ['session_01Gamma0000000', 'added'],
+  ]);
 });
