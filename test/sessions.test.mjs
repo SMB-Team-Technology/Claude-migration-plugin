@@ -145,3 +145,12 @@ test('sessions.json entries match transcripts passed by folder through their ses
   assert.match(data.conversations[0].migrationWarnings.at(-1), /"Synthetic project", which is not in this bundle/);
   assert.deepEqual(data.sourceWarnings, ['Expected session "One-page personal document" (session_01NotFetched) was not collected: no transcript was staged.']);
 });
+
+test('sessions.json entries without a title keep the chat title from the transcript', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'sessions-'));
+  await writeFile(path.join(dir, 't.jsonl'), jsonl(teleported()));
+  await writeFile(path.join(dir, 'sessions.json'), JSON.stringify([{ id: 'session_01SyntheticRemote' }, { id: 'session_01Missing' }]));
+  const data = await collect({ inputsDir: dir, sessionPaths: [path.join(dir, 't.jsonl')], skipLocalSkills: true });
+  assert.equal(data.conversations[0].title, 'Create fictional test files');
+  assert.deepEqual(data.sourceWarnings, ['Expected session "session_01Missing" was not collected: no transcript was staged.']);
+});

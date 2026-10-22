@@ -6,19 +6,32 @@ Nothing is uploaded by the plugin. It writes a local `aiwp-migration-bundle.json
 
 ## Install
 
+**In the Claude desktop app** (the usual way):
+
+1. Open **Customize → Plugins**, add the **Claude migration** plugin (upload the `.zip`, or pick it from your organization's plugins) and turn it **on**. Check that it shows the latest version.
+2. **Quit Claude completely (Cmd+Q on Mac) and open it again.** The new version is only picked up after a restart.
+3. Start a **new** session in the **Code** tab. Sessions that were already open keep the old plugin list.
+
+**In Claude Code (terminal):**
+
 ```
 /plugin marketplace add SMB-Team-Technology/Claude-migration-plugin
 /plugin install claude-migration@smb-team-technology
 ```
 
+Then start a new session.
+
+If Claude says `/claude-migration:migrate` "isn't installed", repeat steps 2 and 3.
+
 ## Use
 
-Run `/migrate` (or ask Claude to "migrate my Claude data to AI Workforce Pro"). Claude will:
+In a new Code-tab session, type `/claude-migration:migrate` (or ask Claude to "migrate my Claude data to AI Workforce Pro"). Claude will:
 
 1. Ask what you want to migrate.
-2. Collect it. Chats come from Claude's own chat-history tools when it has them, otherwise from the claude.ai data export (Settings → Privacy → Export data), which is also where artifacts are recovered from; skills are read from `~/.claude/skills`; memories and scheduled tasks are read by Claude itself and staged as JSON.
-3. Show you what was found and flag anything that looks like it contains a credential, which is left out unless you say otherwise.
-4. Write the bundle and tell you how to import it.
+2. Get your claude.ai export. You click **Settings → Privacy → Export data** in claude.ai; Claude then downloads the files it needs through your browser.
+3. Collect your Cowork and Code chats, skills, memories, scheduled tasks and artifacts.
+4. Show you what was found and what is missing. Anything that looks like a password or key is left out unless you say otherwise.
+5. Save `aiwp-migration-bundle.json` and tell you how to import it.
 
 ## What carries over
 
@@ -56,6 +69,10 @@ node scripts/aiwp-migrate.mjs build --out bundle.json --categories conversations
 ```
 
 The bundle contract is in [docs/bundle-format.md](docs/bundle-format.md); the importer lives in AI Workforce Pro (`packages/api/src/migration`).
+
+### Desktop sessions and a single entry point (0.5.0)
+
+`sessions` lists Cowork sessions with paste-ready teleport commands that use the desktop app's bundled `claude`, plus desktop Code sessions. The plugin now has one entry point, `/claude-migration:migrate` (a skill); the separate command was removed.
 
 ### Export index download (0.4.0)
 

@@ -8,7 +8,7 @@ import { readSessions, linkSessionProjects } from './sources/sessions.mjs';
 
 export const BUNDLE_FORMAT = 'claude-migration-bundle';
 export const BUNDLE_VERSION = 1;
-export const GENERATOR = { name: 'claude-migration-plugin', version: '0.4.0' };
+export const GENERATOR = { name: 'claude-migration-plugin', version: '0.5.0' };
 
 export const CATEGORIES = ['projects', 'conversations', 'memories', 'skills', 'scheduledTasks', 'artifacts'];
 
@@ -66,13 +66,12 @@ const reconcileSessions = (chats, unread) => {
     if (!entry) return chat;
     matched.add(entry);
     const { sourceProjectName, ...rest } = chat;
-    return entry.projectId
-      ? { ...rest, title: entry.title, projectId: entry.projectId }
-      : { ...chat, title: entry.title };
+    const title = entry.title ?? chat.title;
+    return entry.projectId ? { ...rest, title, projectId: entry.projectId } : { ...chat, title };
   });
   const missing = unread
     .filter((entry) => !matched.has(entry))
-    .map((entry) => `Expected session "${entry.title}"${entry.id && entry.id !== entry.title ? ` (${entry.id})` : ''} was not collected: ${entry.path ? 'transcript not found' : 'no transcript was staged'}.`);
+    .map((entry) => `Expected session "${entry.label}"${entry.id && entry.id !== entry.label ? ` (${entry.id})` : ''} was not collected: ${entry.path ? 'transcript not found' : 'no transcript was staged'}.`);
   return { chats: updated, missing };
 };
 

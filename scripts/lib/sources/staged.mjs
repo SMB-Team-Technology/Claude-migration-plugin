@@ -67,7 +67,8 @@ const toConversation = (chat, index) => {
 const toSession = (dir) => (entry, index) => ({
   ...(entry.path ? { path: path.resolve(dir, entry.path) } : {}),
   ...(entry.id ? { id: String(entry.id) } : {}),
-  title: entry.title ?? entry.id ?? `Session ${index + 1}`,
+  label: entry.title ?? entry.id ?? `Session ${index + 1}`,
+  ...(entry.title ? { title: String(entry.title) } : {}),
   ...(entry.projectId ? { projectId: String(entry.projectId) } : {}),
 });
 

@@ -5,8 +5,10 @@ import { parseArgs } from 'node:util';
 import { homedir } from 'node:os';
 import { CATEGORIES, collect, summarize, select, makeBundle, validateBundle } from './lib/bundle.mjs';
 import { downloadExport } from './lib/download.mjs';
+import { listSessions } from './lib/sources/desktop.mjs';
 
 const USAGE = `Usage:
+  aiwp-migrate.mjs sessions
   aiwp-migrate.mjs download [--manifest <member-manifest-….json>] [--dir <folder, default ~/Downloads>] [--wait <seconds>]
   aiwp-migrate.mjs scan  [--export <zip|dir|json>] [--inputs <dir>] [--session <jsonl|dir>]... [--skills-dir <dir>]...
   aiwp-migrate.mjs build --out <file> [--categories a,b] [--exclude id,id] [--allow-flagged]
@@ -57,6 +59,14 @@ const coverage = (values, collected) => ({
 });
 
 const commands = {
+  async sessions() {
+    if (process.platform !== 'darwin') {
+      print({ cowork: [], code: [], notice: 'Listing desktop sessions is supported on macOS only for now.' });
+      return;
+    }
+    print(await listSessions({ home: homedir(), ...(process.env.CLAUDE_CONFIG_DIR ? { configDir: process.env.CLAUDE_CONFIG_DIR } : {}) }));
+  },
+
   async download(values) {
     const waitSeconds = values.wait ? Number(values.wait) : undefined;
     if (waitSeconds !== undefined && !(waitSeconds >= 0)) {

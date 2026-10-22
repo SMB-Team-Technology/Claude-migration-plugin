@@ -1,5 +1,5 @@
 ---
-name: migrate-to-aiwp
+name: migrate
 description: Export the user's Claude projects, chats, memories, skills, scheduled tasks and artifacts into one migration bundle for import into AI Workforce Pro. Use when the user wants to migrate, move, export or back up their Claude data to AI Workforce Pro (AIWP).
 ---
 
@@ -35,15 +35,19 @@ Never print, paste or log the download links. The helper never outputs them eith
 
 ### Cowork and Code sessions
 
-1. **List what is expected first.** Ask the user to open each project in the Claude desktop app and read out its "Chats and tasks" list, plus any standalone Cowork or Code sessions they want. On macOS (observed with Claude desktop 3.6556), two local files help, but neither is complete on its own:
-   - `~/Library/Application Support/Claude/local-agent-mode-sessions/<account>/<org>/remote-session-spaces.json` maps Cowork session IDs (`session_…`) to linked folders. It only covers sessions that have a linked folder.
-   - `~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_*.json` lists desktop Code sessions with `title` and `cliSessionId`.
-   Read only those fields. Never read cookies, tokens, `Local Storage`, `IndexedDB` or other app storage.
-2. **Desktop Code sessions:** the transcript is `~/.claude/projects/<folder>/<cliSessionId>.jsonl`. Pass it as-is.
-3. **Cowork sessions:** you cannot fetch these yourself. For each one, give the user these commands to run in their own terminal, using one new empty folder for all of them:
-   `cd <empty folder> && claude --teleport <session_…>`, then inside the session `/export <name>.txt` and `/exit`.
-   They must not type a message. The full transcript is then saved in `~/.claude/projects/<that folder, path with / replaced by ->/`. Pass that folder; the `.txt` file is lossy and is not used.
-4. Write `$WORK/inputs/sessions.json` with one entry per expected session: its `id` (`session_…` for Cowork, the `cliSessionId` for Code) and the `title` the desktop app shows, plus `path` for a single transcript file. Pass transcript folders with `--session`; entries are matched to transcripts by `id`. Entries that match no transcript are reported as not collected instead of disappearing.
+1. **List them.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/aiwp-migrate.mjs" sessions` (macOS). Do not read the desktop app's folders yourself. It returns:
+   - `cowork`: Cowork sessions with `id`, linked `folders`, whether they are already `collected`, and a ready-to-paste `command`.
+   - `code`: desktop Code sessions with `title` and `transcript` path.
+   - `transcripts`: the folder where fetched Cowork transcripts are saved.
+   It only lists Cowork chats that have a linked folder. Ask the user to compare with each project's "Chats and tasks" list in the desktop app and tell you about any that are missing.
+2. **Desktop Code sessions:** offer them by title. Pass each chosen `transcript` with `--session`.
+3. **Cowork sessions:** you cannot fetch these yourself. Never run the `command` yourself, and never use your own shell or the desktop app's run buttons for it. Give the user one session at a time, in a single code block containing exactly that session's `command`, with these steps:
+   1. Open the **Terminal** app (Applications → Utilities → Terminal, or press Cmd+Space and type Terminal).
+   2. Paste the command and press Return. Wait until the old conversation appears. A "trust this folder" question may appear first; press Return to accept it.
+   3. Do **not** type a message. Type `/export cowork.txt` and press Return, then type `/exit` and press Return.
+   4. Tell Claude when done.
+   After each one, run `sessions` again and check that the session now shows `"collected": true` before giving the next command. If it still shows false, ask what the Terminal showed. If the `claude` field is null, Cowork chats cannot be collected on this computer; say so and continue without them.
+4. Write `$WORK/inputs/sessions.json` with one entry per expected session: `id` (`session_…` for Cowork, the Code `id`) and `title`. Cowork titles are not stored locally, so ask the user for the title shown in the desktop app, or leave `title` out to use the chat's first message. Pass the `transcripts` folder with `--session`. Entries are matched by `id`, and entries that match no transcript are reported as not collected instead of disappearing.
 
 Sessions attached to a project are linked to the exported project with the same name. If two projects share a name, set `projectId` in the entry. Tool calls and their results, images and hidden thinking are reported as not migrated. Files a session created (for example in its linked folder) are not included.
 
