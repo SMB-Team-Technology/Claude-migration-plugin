@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { homedir } from 'node:os';
 import { CATEGORIES, collect, summarize, select, makeBundle, validateBundle } from './lib/bundle.mjs';
 import { downloadExport } from './lib/download.mjs';
-import { listSessions } from './lib/sources/desktop.mjs';
+import { listSessions, fetchAllCommand, PENDING_FILE } from './lib/sources/desktop.mjs';
 
 const USAGE = `Usage:
   aiwp-migrate.mjs sessions
@@ -64,7 +64,18 @@ const commands = {
       print({ cowork: [], code: [], notice: 'Listing desktop sessions is supported on macOS only for now.' });
       return;
     }
-    print(await listSessions({ home: homedir(), ...(process.env.CLAUDE_CONFIG_DIR ? { configDir: process.env.CLAUDE_CONFIG_DIR } : {}) }));
+    const listed = await listSessions({ home: homedir(), ...(process.env.CLAUDE_CONFIG_DIR ? { configDir: process.env.CLAUDE_CONFIG_DIR } : {}) });
+    const pending = listed.cowork.filter((session) => !session.collected).map((session) => session.id);
+    const canFetch = listed.claude && (await access('/usr/bin/expect').then(() => true, () => false));
+    if (pending.length > 0 && canFetch) {
+      await mkdir(listed.teleportFolder, { recursive: true });
+      await writeFile(path.join(listed.teleportFolder, PENDING_FILE), `${pending.join('\n')}\n`);
+    }
+    print({
+      ...listed,
+      pending: pending.length,
+      ...(pending.length > 0 && canFetch ? { fetchAll: fetchAllCommand(listed) } : {}),
+    });
   },
 
   async download(values) {

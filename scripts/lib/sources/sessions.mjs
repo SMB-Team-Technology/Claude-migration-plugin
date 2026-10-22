@@ -3,6 +3,15 @@ import path from 'node:path';
 
 const REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g;
 const LOCAL_COMMAND = /^<(?:command-name|command-message|command-args|local-command-[a-z]+|bash-input|bash-stdout|bash-stderr)>/;
+const COMMAND_NAME = /<command-name>([^<]+)<\/command-name>/;
+const COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
+const SUMMARY_LABEL = '**Summary of the earlier part of this chat**, written by Claude when the chat ran out of context. The original earlier messages were not available.';
+
+/** A slash command the user typed (`/name args`), or null for command output and shell rows. */
+const typedCommand = (part) => {
+  const name = part.match(COMMAND_NAME)?.[1]?.trim();
+  return name ? [name, part.match(COMMAND_ARGS)?.[1]?.trim()].filter(Boolean).join(' ') : null;
+};
 const REMOTE_ID = /session_[A-Za-z0-9]+/;
 const ATTACHED_PROJECT = /attached to the Project \*\*"(.+?)"\*\*/;
 const TITLE_LENGTH = 80;
@@ -43,7 +52,7 @@ const questionText = (input) =>
 /** Collects user and assistant turns from Claude Code / Cowork transcript rows, reporting what was left out. */
 const readTurns = (rows) => {
   const messages = [];
-  const omitted = { tools: new Map(), hiddenThinking: 0, images: 0, localCommands: 0, sidechain: 0 };
+  const omitted = { tools: new Map(), hiddenThinking: 0, images: 0, localCommands: 0, sidechain: 0, compacted: false };
   let assistant = null;
 
   const pushUser = (text, createdAt) => {
@@ -68,16 +77,29 @@ const readTurns = (rows) => {
       pushUser(cleanText(row.attachment.prompt), row.attachment.timestamp ?? row.timestamp);
       continue;
     }
-    if (row.type === 'user' && !row.isMeta && !row.isCompactSummary && row.message) {
+    if (row.type === 'user' && row.isCompactSummary) {
+      // Only when nothing precedes it (teleported chats start at the last compaction); full local histories skip it.
+      const summary = typeof row.message?.content === 'string' ? cleanText(row.message.content) : '';
+      if (messages.length === 0 && summary) {
+        omitted.compacted = true;
+        messages.push({ role: 'assistant', text: `${SUMMARY_LABEL}\n\n${summary}`, ...(row.timestamp ? { createdAt: row.timestamp } : {}) });
+      }
+      continue;
+    }
+    if (row.type === 'user' && !row.isMeta && row.message) {
       const { content } = row.message;
       if (row.toolUseResult?.answers && typeof row.toolUseResult.answers === 'object') {
         pushUser(answerText(row.toolUseResult), row.timestamp);
         continue;
       }
       const parts = userText(Array.isArray(content) || typeof content === 'string' ? content : []).map(cleanText).filter(Boolean);
-      const commands = parts.filter((part) => LOCAL_COMMAND.test(part));
-      omitted.localCommands += commands.length;
-      const text = parts.filter((part) => !LOCAL_COMMAND.test(part)).join('\n\n');
+      const kept = parts.flatMap((part) => {
+        if (!LOCAL_COMMAND.test(part)) return [part];
+        const command = typedCommand(part);
+        if (!command) omitted.localCommands += 1;
+        return command ? [command] : [];
+      });
+      const text = kept.join('\n\n');
       if (text) pushUser(text, row.timestamp);
       continue;
     }
@@ -117,7 +139,8 @@ const warningsFor = (omitted) => {
   }
   if (omitted.hiddenThinking) warnings.push('Hidden, summarized or truncated thinking is not recovered as full thinking.');
   if (omitted.images) warnings.push(`${omitted.images} image(s) attached in this session were not migrated.`);
-  if (omitted.localCommands) warnings.push(`${omitted.localCommands} local shell or slash command(s) typed in the session were omitted.`);
+  if (omitted.localCommands) warnings.push(`${omitted.localCommands} local shell command(s) or command output(s) in the session were omitted.`);
+  if (omitted.compacted) warnings.push('This chat was compacted in Claude. Messages before the compaction were not available; the chat starts with Claude\'s summary of them.');
   if (omitted.sidechain) warnings.push('Subagent transcripts in this session were not migrated.');
   return warnings;
 };

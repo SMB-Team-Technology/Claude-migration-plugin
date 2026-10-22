@@ -40,14 +40,13 @@ Never print, paste or log the download links. The helper never outputs them eith
    - `code`: desktop Code sessions with `title` and `transcript` path.
    - `transcripts`: the folder where fetched Cowork transcripts are saved.
    It only lists Cowork chats that have a linked folder. Ask the user to compare with each project's "Chats and tasks" list in the desktop app and tell you about any that are missing.
-2. **Desktop Code sessions:** offer them by title. Pass each chosen `transcript` with `--session`.
-3. **Cowork sessions:** you cannot fetch these yourself. Never run the `command` yourself, and never use your own shell or the desktop app's run buttons for it. Give the user one session at a time, in a single code block containing exactly that session's `command`, with these steps:
-   1. Open the **Terminal** app (Applications → Utilities → Terminal, or press Cmd+Space and type Terminal).
-   2. Paste the command and press Return. Wait until the old conversation appears. A "trust this folder" question may appear first; press Return to accept it.
-   3. Do **not** type a message. Type `/export cowork.txt` and press Return, then type `/exit` and press Return.
-   4. Tell Claude when done.
-   After each one, run `sessions` again and check that the session now shows `"collected": true` before giving the next command. If it still shows false, ask what the Terminal showed. If the `claude` field is null, Cowork chats cannot be collected on this computer; say so and continue without them.
-4. Write `$WORK/inputs/sessions.json` with one entry per expected session: `id` (`session_…` for Cowork, the Code `id`) and `title`. Cowork titles are not stored locally, so ask the user for the title shown in the desktop app, or leave `title` out to use the chat's first message. Pass the `transcripts` folder with `--session`. Entries are matched by `id`, and entries that match no transcript are reported as not collected instead of disappearing.
+2. **Desktop Code sessions:** ask whether to include them, with **"All (recommended)"** as the first option, then groups or individual sessions by title, then "None". Pass each chosen `transcript` with `--session`.
+3. **Cowork sessions:** sessions with `"collected": true` are already fetched; pass their `transcript` with `--session`. For the rest (`pending`), `sessions` returns one `fetchAll` command that fetches all of them in one go. You cannot run it yourself: never run `fetchAll` or a session's `command`. Give the user `fetchAll` exactly as returned, in a plain `text` code block (not `bash`, so the desktop app shows no run ▶ button), with these steps:
+   1. Copy the command. In the Claude desktop app, open a terminal with the **terminal icon** (not ▶). Elsewhere, open the **Terminal** app (Cmd+Space, type Terminal). Paste and press Return.
+   2. Leave it running and don't type in that window. It shows one line per chat, for example `[3/120] session_… ✅`, and ends with `Finished: N of N fetched`. It takes about half a minute per chat, so tell the user roughly how long to expect.
+   3. Tell Claude when it says Finished, or paste any ❌ lines.
+   Then run `sessions` again. If some are still pending, give the same `fetchAll` again: it retries only those. After two failed attempts for a session, continue without it and report it as not collected. If `claude` is null or `fetchAll` is missing while chats are pending, Cowork chats cannot be fetched on this computer; say so and continue without them.
+4. Write `$WORK/inputs/sessions.json` with one entry per expected session: `id` (`session_…` for Cowork, the Code `id`) and `title`. Cowork titles are not stored locally, so ask the user for the title shown in the desktop app, or leave `title` out to use the chat's first message. Pass each collected session's `transcript` with `--session`. Entries are matched by `id`, and entries that match no transcript are reported as not collected instead of disappearing.
 
 Sessions attached to a project are linked to the exported project with the same name. If two projects share a name, set `projectId` in the entry. Tool calls and their results, images and hidden thinking are reported as not migrated. Files a session created (for example in its linked folder) are not included.
 
@@ -91,7 +90,7 @@ It prints `categories` and a `coverage` report. Per category there is a count, t
 ## 3. Let the user choose
 
 - Confirm the categories to include (use the answers from step 1, adjusted for what was actually found).
-- Offer per-item choices for categories with few items (skills, scheduled tasks, artifacts, memories). For chats offer "all", or exclusion by title or date.
+- Whenever you ask the user to choose items, make **"All (recommended)"** the first option, and pre-select the recommendation (for skills: their own and team skills, not Claude's built-ins). Then offer groups or individual items, then "None". For chats, offer "all", or exclusion by title or date.
 - For every item with a `warning`, tell the user which item and why, and ask whether to leave it out. **Default to leaving it out.** Only pass `--allow-flagged` if the user explicitly says to include those items.
 
 ## 4. Build the bundle

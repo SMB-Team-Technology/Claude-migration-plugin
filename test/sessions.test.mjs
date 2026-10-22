@@ -55,7 +55,7 @@ test('teleported Cowork sessions keep the conversation and drop injected, tool a
   assert.equal(chat.messages[4].text, 'Working on it.\n\nCreated the files.');
   assert.equal(chat.messages[4].createdAt, at(6));
   const all = JSON.stringify(chat.messages);
-  assert.doesNotMatch(all, /Folder connected|TOOL OUTPUT|touch|export|bash-input|Caveat/);
+  assert.doesNotMatch(all, /Folder connected|TOOL OUTPUT|touch|\/export|bash-input|Caveat/);
   assert.equal(chat.createdAt, at(0));
   assert.equal(chat.updatedAt, at(9));
   assert.match(chat.migrationWarnings[0], /^2 tool calls .*device_bash ×2/);
@@ -153,4 +153,35 @@ test('sessions.json entries without a title keep the chat title from the transcr
   const data = await collect({ inputsDir: dir, sessionPaths: [path.join(dir, 't.jsonl')], skipLocalSkills: true });
   assert.equal(data.conversations[0].title, 'Create fictional test files');
   assert.deepEqual(data.sourceWarnings, ['Expected session "session_01Missing" was not collected: no transcript was staged.']);
+});
+
+test('slash commands the user typed stay in the chat; command output and shell rows do not', () => {
+  const chat = toSessionConversation([
+    { type: 'user', timestamp: at(0), message: { role: 'user', content: '<command-message>claude-migration:migrate</command-message>\n<command-name>/claude-migration:migrate</command-name>\n<command-args>skills only</command-args>' } },
+    { type: 'user', isMeta: true, message: { role: 'user', content: 'EXPANDED SKILL PROMPT' } },
+    { type: 'assistant', timestamp: at(1), message: { role: 'assistant', content: [{ type: 'text', text: 'What should I migrate?' }] } },
+    { type: 'user', message: { role: 'user', content: '<local-command-stdout>Model set</local-command-stdout>' } },
+    { type: 'user', message: { role: 'user', content: '<bash-input>ls</bash-input>' } },
+  ]);
+  assert.deepEqual(chat.messages.map((message) => [message.role, message.text]), [
+    ['user', '/claude-migration:migrate skills only'],
+    ['assistant', 'What should I migrate?'],
+  ]);
+  assert.match(chat.migrationWarnings.join(' '), /2 local shell command\(s\) or command output\(s\)/);
+});
+
+test('a chat that starts at a compaction keeps the summary, labelled; full histories do not repeat it', () => {
+  const summaryRow = { type: 'user', isCompactSummary: true, remoteSourced: true, timestamp: at(0), message: { role: 'user', content: 'Earlier we planned the pipeline.' } };
+  const reply = { type: 'assistant', remoteSourced: true, timestamp: at(1), message: { role: 'assistant', content: [{ type: 'text', text: 'Continuing.' }] } };
+  const started = toSessionConversation([summaryRow, reply]);
+  assert.equal(started.messages[0].role, 'assistant');
+  assert.match(started.messages[0].text, /^\*\*Summary of the earlier part of this chat\*\*[\s\S]*Earlier we planned the pipeline\.$/);
+  assert.match(started.migrationWarnings.join(' '), /compacted/);
+  const full = toSessionConversation([
+    { type: 'user', timestamp: at(0), message: { role: 'user', content: 'Plan the pipeline' } },
+    { ...summaryRow, timestamp: at(1) },
+    reply,
+  ]);
+  assert.deepEqual(full.messages.map((message) => message.text), ['Plan the pipeline', 'Continuing.']);
+  assert.doesNotMatch(full.migrationWarnings.join(' '), /compacted/);
 });

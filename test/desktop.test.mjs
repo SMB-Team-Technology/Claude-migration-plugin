@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { listSessions, projectSlug } from '../scripts/lib/sources/desktop.mjs';
+import { listSessions, projectSlug, fetchAllCommand, FETCH_SCRIPT } from '../scripts/lib/sources/desktop.mjs';
 
 const write = async (file, text) => {
   await mkdir(path.dirname(file), { recursive: true });
@@ -28,7 +28,8 @@ const desktopHome = async () => {
   await write(path.join(sessions, 'local_3.json'), JSON.stringify({ cliSessionId: 'cli-3', cwd: '/Users/x/gone', title: 'No transcript' }));
   await write(path.join(projects, projectSlug('/Users/x/repo'), 'cli-1.jsonl'), '{"type":"user"}\n');
   await write(path.join(projects, projectSlug('/Users/x/tele'), 'cli-2.jsonl'), '{"type":"user","remoteSourced":true}\n');
-  await write(path.join(projects, projectSlug(path.join(home, 'aiwp-migration', 'cowork')), 'any.jsonl'), '{"url":"https://claude.ai/code/session_01Beta"}\n');
+  await write(path.join(projects, 'some-earlier-folder', 'old.jsonl'), '{"type":"user","remoteSourced":true}\n{"type":"attachment","attachment":{"type":"remote_session_change","url":"https://claude.ai/code/session_01Beta"}}\n');
+  await write(path.join(projects, 'unrelated', 'mention.jsonl'), '{"type":"user","message":{"content":"see session_01Alpha"}}\n');
   return { home, app, projects };
 };
 
@@ -43,7 +44,10 @@ test('lists Cowork sessions with paste-ready commands for the bundled claude, an
   const { home, app, projects } = await desktopHome();
   const result = await listSessions({ home });
   assert.equal(result.claude, path.join(app, 'claude-code', '2.1.10', 'b2', 'claude.app', 'Contents', 'MacOS', 'claude'));
-  assert.deepEqual(result.cowork.map((item) => [item.id, item.collected]), [['session_01Alpha', false], ['session_01Beta', true]]);
+  assert.deepEqual(result.cowork.map((item) => [item.id, item.collected, item.transcript && path.basename(item.transcript)]), [
+    ['session_01Alpha', false, null],
+    ['session_01Beta', true, 'old.jsonl'],
+  ]);
   const [first] = result.cowork;
   assert.match(first.command, /^mkdir -p '.*aiwp-migration\/cowork' && cd '.*' && '.*claude' --teleport session_01Alpha$/);
   assert.ok(first.command.includes("home'\\''s-"), 'quotes in paths are escaped for the shell');
@@ -61,4 +65,13 @@ test('without the desktop app there are no commands, and the reason is stated', 
   assert.equal(result.claude, null);
   assert.deepEqual(result.cowork, []);
   assert.match(result.notice, /built-in command-line tool was not found/);
+});
+
+test('one paste-ready command fetches every pending chat with built-in tools only', () => {
+  const command = fetchAllCommand({ teleportFolder: "/Users/o'neil/aiwp-migration/cowork", claude: '/Apps/Claude Support/claude' });
+  assert.equal(
+    command,
+    `mkdir -p '/Users/o'\\''neil/aiwp-migration/cowork' && cd '/Users/o'\\''neil/aiwp-migration/cowork' && '/usr/bin/expect' '${FETCH_SCRIPT}' '/Apps/Claude Support/claude' pending-sessions.txt`,
+  );
+  assert.match(FETCH_SCRIPT, /scripts\/fetch\.exp$/);
 });

@@ -1,5 +1,10 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { open, readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export const FETCH_SCRIPT = fileURLToPath(new URL('../../fetch.exp', import.meta.url));
+export const PENDING_FILE = 'pending-sessions.txt';
+const EXPECT = '/usr/bin/expect';
 
 const exists = (file) => stat(file).then(() => true, () => false);
 
@@ -47,13 +52,44 @@ export const findDesktopClaude = async (appDir) => {
 /** `<account>/<org>` folders the desktop app keeps per signed-in organization. */
 const orgDirs = async (root) => (await Promise.all((await subdirs(root)).map(subdirs))).flat();
 
-const transcriptIds = async (dir) => {
-  const names = await readdir(dir).catch(() => []);
-  const texts = await Promise.all(names.filter((name) => name.endsWith('.jsonl')).map((name) => readFile(path.join(dir, name), 'utf8')));
-  return (id) => texts.some((text) => text.includes(id));
+const HEAD_BYTES = 256 * 1024;
+const REMOTE_SESSION = /"remote_session_change"[^\n]*?(session_[A-Za-z0-9]+)/;
+
+const readHead = async (file) => {
+  const handle = await open(file, 'r');
+  try {
+    const buffer = Buffer.alloc(HEAD_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    await handle.close();
+  }
 };
 
-const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+/**
+ * Finds Cowork transcripts already fetched anywhere under `projects` (from any earlier teleport),
+ * keyed by remote session id, newest first. Reads only the start of each transcript.
+ */
+const fetchedTranscripts = async (projects) => {
+  const files = (await Promise.all((await subdirs(projects)).map(async (dir) =>
+    (await readdir(dir)).filter((name) => name.endsWith('.jsonl')).map((name) => path.join(dir, name)),
+  ))).flat();
+  const found = new Map();
+  for (const file of files) {
+    const head = await readHead(file);
+    const id = head.includes('"remoteSourced":true') ? head.match(REMOTE_SESSION)?.[1] : undefined;
+    if (!id) continue;
+    const { mtimeMs } = await stat(file);
+    if (!found.has(id) || found.get(id).mtimeMs < mtimeMs) found.set(id, { file, mtimeMs });
+  }
+  return found;
+};
+
+export const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+
+/** The single command a user pastes into a terminal to fetch every pending Cowork chat, using only built-in macOS tools. */
+export const fetchAllCommand = ({ teleportFolder, claude, expect = EXPECT, script = FETCH_SCRIPT }) =>
+  `mkdir -p ${shellQuote(teleportFolder)} && cd ${shellQuote(teleportFolder)} && ${shellQuote(expect)} ${shellQuote(script)} ${shellQuote(claude)} ${PENDING_FILE}`;
 
 /**
  * Lists Cowork sessions (IDs and linked folders) and desktop Code sessions (titles and transcripts)
@@ -62,7 +98,7 @@ const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 export const listSessions = async ({ home, appDir = path.join(home, 'Library', 'Application Support', 'Claude'), configDir = path.join(home, '.claude') }) => {
   const teleportFolder = path.join(home, 'aiwp-migration', 'cowork');
   const transcripts = path.join(configDir, 'projects', projectSlug(teleportFolder));
-  const collected = await transcriptIds(transcripts);
+  const fetched = await fetchedTranscripts(path.join(configDir, 'projects'));
   const claude = await findDesktopClaude(appDir);
 
   const spaces = await Promise.all(
@@ -75,7 +111,8 @@ export const listSessions = async ({ home, appDir = path.join(home, 'Library', '
     .map((entry) => ({
       id: entry.sessionId,
       folders: (entry.folders ?? []).filter((folder) => typeof folder === 'string'),
-      collected: collected(entry.sessionId),
+      collected: fetched.has(entry.sessionId),
+      transcript: fetched.get(entry.sessionId)?.file ?? null,
       ...(claude ? { command: `mkdir -p ${shellQuote(teleportFolder)} && cd ${shellQuote(teleportFolder)} && ${shellQuote(claude)} --teleport ${entry.sessionId}` } : {}),
     }));
 

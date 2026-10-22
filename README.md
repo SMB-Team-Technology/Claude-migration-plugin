@@ -49,7 +49,7 @@ In a new Code-tab session, type `/claude-migration:migrate` (or ask Claude to "m
 The claude.ai export contains **Chat-mode conversations only**. Chats run in Cowork mode (even inside a cloud project) and desktop Code sessions are not in it. Collect them as session transcripts (`.jsonl`) and pass them with `--session` or list them in `inputs/sessions.json`:
 
 - **Desktop Code sessions**: `~/.claude/projects/<folder>/<session-id>.jsonl` already holds the full transcript.
-- **Cowork sessions**: the user runs `claude --teleport <session_…>` from an empty folder, types `/export <name>.txt` and then `/exit` (no message is sent). The full transcript is then saved under `~/.claude/projects/<that folder>/`. The `.txt` export itself is lossy and is not used.
+- **Cowork sessions**: `sessions` returns one `fetchAll` command. The user pastes it once into a terminal (the Claude desktop app's terminal icon, or the Terminal app). It runs `scripts/fetch.exp` with built-in macOS `expect` and the desktop app's bundled `claude`: for each pending session it teleports, waits for "Session resumed", runs only `/export` and `/exit`, and never types a message. The first time, the user answers the folder-trust question once if it cannot be answered automatically. Failed chats are listed, and running the command again retries only those. Full transcripts land in `~/.claude/projects/<folder>/`; the `.txt` exports are deleted.
 
 Transcripts keep user and assistant text, questions Claude asked and the answers, messages typed while Claude was working, and visible thinking. Tool calls and their results, images, hidden thinking and subagent transcripts are reported as not migrated. A session attached to a project is linked to the exported project with the same, unique name. Repeated teleports of one session are deduplicated by its `session_…` ID. Never use snippets as full conversations.
 
@@ -69,6 +69,10 @@ node scripts/aiwp-migrate.mjs build --out bundle.json --categories conversations
 ```
 
 The bundle contract is in [docs/bundle-format.md](docs/bundle-format.md); the importer lives in AI Workforce Pro (`packages/api/src/migration`).
+
+### One-paste Cowork fetch (0.6.0)
+
+All pending Cowork chats are fetched with one pasted command (`fetchAll` from `sessions`), with no Node needed in the user's terminal. Chats already fetched anywhere on the Mac are skipped. Slash commands the user typed are kept as their message. A chat that starts at a compaction keeps Claude's labelled summary of the earlier part, with a warning.
 
 ### Desktop sessions and a single entry point (0.5.0)
 

@@ -1,0 +1,131 @@
+#!/usr/bin/expect -f
+# Fetches Cowork chats so their full transcripts are saved on this computer.
+# Usage (from the folder the transcripts belong to): expect fetch.exp <claude program> <file with one session id per line>
+# For each session it opens `claude --teleport <id>`, waits for "Session resumed", runs only /export and /exit,
+# and never types a message. Failed sessions are skipped and reported; running it again retries them.
+set bin [lindex $argv 0]
+set list [lindex $argv 1]
+log_user 0
+
+set handle [open $list r]
+set ids {}
+foreach line [split [read $handle] "\n"] {
+  set line [string trim $line]
+  if {[regexp {^session_[A-Za-z0-9]+$} $line]} { lappend ids $line }
+}
+close $handle
+
+set total [llength $ids]
+if {$total == 0} { puts "Nothing to fetch: all Cowork chats are already collected."; exit 0 }
+puts "Fetching $total Cowork chat(s). Leave this window open; do not type here until it says Finished."
+
+# One-time folder trust, answered in an empty start-up (no conversation loaded), so trust text on screen
+# can only be the dialog. The teleport loop below never answers prompts.
+set gap {(?:\s|\u001b\[[0-9;?]*[A-Za-z])+}
+# Patterns are built once: Expect does not substitute variables inside a braced pattern string.
+set trustPat "safety${gap}check|trust${gap}this${gap}folder"
+set yesSelectedPat "\u276f${gap}Yes,${gap}I${gap}trust"
+set resumedPat "Session${gap}resumed"
+log_file -a -noappend fetch-startup.log
+set trusted "unknown"
+spawn $bin
+stty rows 40 columns 120 < $spawn_out(slave,name)
+set timeout 30
+expect {
+  -re $trustPat {
+    # "No, exit" is listed first and pre-selected: move down to "Yes, I trust this folder" and confirm only once it is selected.
+    send "\033\[B"
+    set timeout 5
+    expect -re $yesSelectedPat {
+      sleep 1
+      send "\r"
+      # Claude exits if the answer was "No"; still running means the folder is now trusted.
+      set timeout 5
+      expect eof { set trusted "no" } timeout { set trusted "yes" }
+    } timeout { set trusted "no" } eof { set trusted "no" }
+  }
+  timeout {}
+  eof {}
+}
+if {$trusted ne "no"} {
+  send -- "/exit"
+  sleep 1
+  send "\r"
+  set timeout 20
+  expect { eof {} timeout {} }
+}
+catch { close }
+catch { wait }
+log_file
+
+if {$trusted eq "no"} {
+  # Fallback: let the user answer the one-time question themselves.
+  puts ""
+  puts "One-time step: Claude asks whether you trust this folder."
+  puts "Use the arrow keys to choose \"Yes, I trust this folder\" and press Return. Then type /exit and press Return."
+  puts ""
+  log_user 1
+  spawn $bin
+  interact
+  catch { wait }
+  log_user 0
+  puts ""
+  puts "Thanks. Fetching your chats now."
+}
+
+set done 0
+set failed {}
+set index 0
+foreach id $ids {
+  incr index
+  set out "cowork-[clock milliseconds].txt"
+  set result "failed"
+  spawn $bin --teleport $id
+  stty rows 40 columns 120 < $spawn_out(slave,name)
+  set timeout 180
+  expect {
+    -re $resumedPat { set result "loaded" }
+    timeout { set result "timed out loading" }
+    eof { set result "closed before loading" }
+  }
+  if {$result eq "loaded"} {
+    sleep 2
+    send -- "/export $out"
+    sleep 1
+    send "\r"
+    set timeout 1
+    set waited 0
+    while {![file exists $out] && $waited < 90} {
+      expect -re {.+} {} timeout {} eof { break }
+      incr waited
+    }
+    if {[file exists $out]} {
+      set result "ok"
+      sleep 1
+      send -- "/exit"
+      sleep 1
+      send "\r"
+      set timeout 20
+      expect { eof {} timeout {} }
+      file delete -force $out
+    } else {
+      set result "export did not finish"
+    }
+  }
+  catch { close }
+  catch { wait }
+  if {$result eq "ok"} {
+    incr done
+    puts "\[$index/$total\] $id ✅"
+  } else {
+    lappend failed $id
+    puts "\[$index/$total\] $id ❌ $result"
+  }
+}
+
+puts "Finished: $done of $total fetched."
+if {[llength $failed] > 0} {
+  puts "Not fetched: [join $failed {, }]. Run the same command again to retry them."
+  exit 1
+}
+exit 0
