@@ -24,7 +24,7 @@ Run `/migrate` (or ask Claude to "migrate my Claude data to AI Workforce Pro"). 
 
 | Category | Notes |
 |---|---|
-| Projects | Names, instructions and text context from explicit export/staged records. Requires the updated AIWP importer. Original project files are not migrated. |
+| Projects | Names, descriptions, instructions and text context from explicit export/staged records. Requires the updated AIWP importer. Original project files are not migrated. |
 | Chats | Text and thinking. Attachments and images are not included. |
 | Memories | Imported as separate facts. |
 | Skills | `SKILL.md` plus text supporting files in the bundle. AIWP currently imports the `SKILL.md`. |
@@ -50,3 +50,9 @@ node scripts/aiwp-migrate.mjs build --out bundle.json --categories conversations
 ```
 
 The bundle contract is in [docs/bundle-format.md](docs/bundle-format.md); the importer lives in AI Workforce Pro (`packages/api/src/migration`).
+
+### Export fidelity fixes (0.2.1)
+
+Individual Claude project JSON records (including UUID-named files inside folders/archives) are recognized by their project shape. Account metadata in `users.json` is not imported. Project descriptions are preserved separately from instructions. Duplicate project records are rejected rather than silently merged.
+
+`step_card_display_v0` cards become numbered Markdown steps in their original message position. Tool-result copies are not duplicated. Hidden thinking summaries are not treated as full thinking; omitted tool payloads, citations and unsupported structured blocks produce coverage warnings. Text-only fallback messages are kept verbatim.

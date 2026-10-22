@@ -9,10 +9,10 @@ Every category is optional and omitted when empty. Every item has an `id` that i
   "format": "claude-migration-bundle",
   "version": 1,
   "createdAt": "2026-10-19T12:00:00.000Z",
-  "generator": { "name": "claude-migration-plugin", "version": "0.2.0" },
+  "generator": { "name": "claude-migration-plugin", "version": "0.2.1" },
 
   "migrationWarnings": ["Local Cowork coverage must be verified separately"],
-  "projects": [{ "id": "project-uuid", "name": "Client", "instructions": "…", "context": "…" }],
+  "projects": [{ "id": "project-uuid", "name": "Client", "description": "Migration", "instructions": "…", "context": "…" }],
   "conversations": [{
     "projectId": "project-uuid", // optional; select the project with its chats
     "id": "uuid", "title": "Lease review",
@@ -60,3 +60,5 @@ Projects are an optional v1 extension and require an updated AIWP server. Older 
 Project names are limited to 128 characters; instructions and context to 100,000 characters each. Project files, attachments and connectors are **not** migrated; do not turn binary files into invented text context. `migrationWarnings` carries coverage limitations through preview and import results. Source adapters recognize explicit project `id`/`uuid`, `name`, `instructions`/`prompt_template`, and optional text `context`; other layouts require verified staging rather than guessing.
 
 The helper rejects indexes and empty/mismatched payloads. A successful build reports collected counts, not source-account completeness or destination verification.
+
+Project `description` is optional text, limited to 100,000 characters, stored separately from instructions/context. Individual Claude project objects with `uuid`, `name` and `prompt_template` are accepted directly; UUID-named project records are discovered within export folders and archives. `users.json` is ignored. Structured step display cards are converted to ordered Markdown; fidelity limitations are included in `migrationWarnings`.

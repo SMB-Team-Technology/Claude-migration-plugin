@@ -6,12 +6,12 @@ import { toProject } from './sources/projects.mjs';
 
 export const BUNDLE_FORMAT = 'claude-migration-bundle';
 export const BUNDLE_VERSION = 1;
-export const GENERATOR = { name: 'claude-migration-plugin', version: '0.2.0' };
+export const GENERATOR = { name: 'claude-migration-plugin', version: '0.2.1' };
 
 export const CATEGORIES = ['projects', 'conversations', 'memories', 'skills', 'scheduledTasks', 'artifacts'];
 
 const itemText = {
-  projects: (item) => `${item.instructions}\n${item.context}`,
+  projects: (item) => `${item.description ?? ''}\n${item.instructions}\n${item.context}`,
   conversations: (item) => item.messages.map((message) => `${message.text}\n${message.thinking ?? ''}`).join('\n'),
   memories: (item) => item.value,
   skills: (item) => [item.content, ...item.files.map((file) => file.content)].join('\n'),
@@ -146,6 +146,7 @@ export const validateBundle = (bundle) => {
         return [`${label} requires name, instructions and context text`];
       }
       if (category === 'projects') {
+        if (item.description !== undefined && (typeof item.description !== 'string' || item.description.length > 100_000)) return [`${label} description must be text of at most 100000 characters`];
         if (item.name.length > 128) return [`${label} name exceeds 128 characters`];
         if (item.instructions.length > 100_000) return [`${label} instructions exceed 100000 characters`];
         if (item.context.length > 100_000) return [`${label} context exceeds 100000 characters`];

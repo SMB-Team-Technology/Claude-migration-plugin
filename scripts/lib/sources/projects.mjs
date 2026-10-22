@@ -14,10 +14,14 @@ export const toProject = (project) => {
   if (project.context !== undefined && typeof project.context !== 'string') {
     throw new Error(`Project ${id}: context must be text`);
   }
+  if (project.description !== undefined && typeof project.description !== 'string') {
+    throw new Error(`Project ${id}: description must be text`);
+  }
   const files = project.files ?? project.docs ?? project.documents;
   return {
     id,
     name: name.trim(),
+    description: text(project.description),
     instructions: text(instructions),
     context: text(project.context),
     ...(files && (!Array.isArray(files) || files.length > 0)

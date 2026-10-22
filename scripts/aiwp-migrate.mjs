@@ -42,6 +42,7 @@ const coverage = (values, collected) => ({
     ...CATEGORIES.filter((category) => collected[category].length === 0)
       .map((category) => `No ${category} collected; this is not proof that the source account has none.`),
     ...collected.projects.flatMap((project) => project.migrationWarnings ?? []),
+    ...collected.conversations.flatMap((chat) => (chat.migrationWarnings ?? []).map((warning) => `${chat.title}: ${warning}`)),
   ],
   sources: { export: values.export ?? null, staged: values.inputs ?? null },
 });
