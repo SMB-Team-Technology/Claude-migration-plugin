@@ -18,10 +18,25 @@ Ask which of these the user wants to migrate (multi-select): **Projects, Chats, 
 | Projects | Read `projects.json` from the actual export, or stage `$WORK/inputs/projects.json` from a verified source. Preserve stable IDs, names, instructions and text context. Do not guess local storage paths. Project files are not migrated in this version; report them and ask the user to add originals in AIWP. |
 | Chats | **Try your own chat-history tools first** (for example tools that list recent chats or search/fetch past conversations). If you have them, gather the chats and write `$WORK/inputs/conversations.json` (below). If you have no such tool, or it cannot return full messages, use the data export instead. |
 | Chats, Artifacts (export) | The claude.ai data export. Ask for the path to the `.zip` (or extracted folder). If they do not have one: claude.ai → Settings → Privacy → **Export data**; the download link is emailed and may take a while. Artifacts are rebuilt from the chats in that export. Offer the export when the tool route is partial, but do not claim it includes desktop-local Cowork projects or sessions. An emailed index is not the payload; obtain the separate actual archives. The helper accepts one export path; for separate archives extract their payload JSON files into a common source folder without overwriting duplicates, then pass that folder. |
+| Chats (Cowork and Code sessions) | **Not in the claude.ai export**, which holds Chat-mode conversations only, even for chats inside a cloud project. Collect them as session transcripts; see "Cowork and Code sessions" below. |
 | Skills | Read from `~/.claude/skills` automatically. Ask whether there are other skill folders; pass each with `--skills-dir`. |
 | Memories | Only you can read these. Write them to `$WORK/inputs/memories.json` (below). |
 | Scheduled tasks | Only you can read these. List them with whichever scheduled-task tool you have (for example a scheduled-tasks or cron list tool), then write `$WORK/inputs/scheduled-tasks.json`. |
 | Extra artifacts | If you have a tool that lists the user's published artifacts, read their content and add them to `$WORK/inputs/artifacts.json`. Skip this if you have no such tool. |
+
+### Cowork and Code sessions
+
+1. **List what is expected first.** Ask the user to open each project in the Claude desktop app and read out its "Chats and tasks" list, plus any standalone Cowork or Code sessions they want. On macOS (observed with Claude desktop 3.6556), two local files help, but neither is complete on its own:
+   - `~/Library/Application Support/Claude/local-agent-mode-sessions/<account>/<org>/remote-session-spaces.json` maps Cowork session IDs (`session_…`) to linked folders. It only covers sessions that have a linked folder.
+   - `~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_*.json` lists desktop Code sessions with `title` and `cliSessionId`.
+   Read only those fields. Never read cookies, tokens, `Local Storage`, `IndexedDB` or other app storage.
+2. **Desktop Code sessions:** the transcript is `~/.claude/projects/<folder>/<cliSessionId>.jsonl`. Pass it as-is.
+3. **Cowork sessions:** you cannot fetch these yourself. For each one, give the user these commands to run in their own terminal, using one new empty folder for all of them:
+   `cd <empty folder> && claude --teleport <session_…>`, then inside the session `/export <name>.txt` and `/exit`.
+   They must not type a message. The full transcript is then saved in `~/.claude/projects/<that folder, path with / replaced by ->/`. Pass that folder; the `.txt` file is lossy and is not used.
+4. Write `$WORK/inputs/sessions.json` with one entry per expected session: its `id` (`session_…` for Cowork, the `cliSessionId` for Code) and the `title` the desktop app shows, plus `path` for a single transcript file. Pass transcript folders with `--session`; entries are matched to transcripts by `id`. Entries that match no transcript are reported as not collected instead of disappearing.
+
+Sessions attached to a project are linked to the exported project with the same name. If two projects share a name, set `projectId` in the entry. Tool calls and their results, images and hidden thinking are reported as not migrated. Files a session created (for example in its linked folder) are not included.
 
 Staging files are plain JSON, written by you from real data. Never invent entries, and say plainly when a source is unavailable rather than guessing.
 
@@ -55,7 +70,7 @@ Run the scan with the flags for the sources you gathered:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/aiwp-migrate.mjs" scan \
-  --export "<zip-or-folder>" --inputs "$WORK/inputs" [--skills-dir "<dir>"]...
+  --export "<zip-or-folder>" --inputs "$WORK/inputs" [--session "<jsonl-or-folder>"]... [--skills-dir "<dir>"]...
 ```
 
 It prints `categories` and a `coverage` report. Per category there is a count, the item titles, and a `warning` on any item that appears to contain a credential. Summarise the counts for the user in a short table. Do not print full item lists unless asked; offer to show a category.
@@ -71,7 +86,7 @@ It prints `categories` and a `coverage` report. Per category there is a count, t
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/aiwp-migrate.mjs" build --out "$WORK/aiwp-migration-bundle.json" \
   --categories conversations,skills --exclude "<id>,<id>" \
-  --export "<zip-or-folder>" --inputs "$WORK/inputs" [--skills-dir "<dir>"]...
+  --export "<zip-or-folder>" --inputs "$WORK/inputs" [--session "<jsonl-or-folder>"]... [--skills-dir "<dir>"]...
 ```
 
 Categories: `projects`, `conversations`, `memories`, `skills`, `scheduledTasks`, `artifacts`. Then run `validate` on the output and report counts, coverage warnings and credential exclusions. Include the projects referenced by selected chats. Never say validation establishes completeness or a successful destination import. If any requested source is unavailable, label the result partial.

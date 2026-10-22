@@ -33,7 +33,12 @@ Run `/migrate` (or ask Claude to "migrate my Claude data to AI Workforce Pro"). 
 
 ## Coverage and local Cowork data
 
-The cloud export does **not** establish coverage of desktop-local Cowork projects or sessions. This release does not auto-discover desktop storage. Stage verified local records using the shapes in [docs/bundle-format.md](docs/bundle-format.md), or report that source as unavailable. Never use snippets as full conversations.
+The claude.ai export contains **Chat-mode conversations only**. Chats run in Cowork mode (even inside a cloud project) and desktop Code sessions are not in it. Collect them as session transcripts (`.jsonl`) and pass them with `--session` or list them in `inputs/sessions.json`:
+
+- **Desktop Code sessions**: `~/.claude/projects/<folder>/<session-id>.jsonl` already holds the full transcript.
+- **Cowork sessions**: the user runs `claude --teleport <session_…>` from an empty folder, types `/export <name>.txt` and then `/exit` (no message is sent). The full transcript is then saved under `~/.claude/projects/<that folder>/`. The `.txt` export itself is lossy and is not used.
+
+Transcripts keep user and assistant text, questions Claude asked and the answers, messages typed while Claude was working, and visible thinking. Tool calls and their results, images, hidden thinking and subagent transcripts are reported as not migrated. A session attached to a project is linked to the exported project with the same, unique name. Repeated teleports of one session are deduplicated by its `session_…` ID. Never use snippets as full conversations.
 
 Export indexes are not payloads. Download the actual archives. For separate archives, extract `projects.json`, `conversations.json` and `memories.json` into one source folder, avoiding overwrites, and pass that folder with `--export`. `scan` returns `categories` plus coverage warnings; `build` embeds those warnings for review in AIWP. A valid bundle is not proof of complete migration.
 
@@ -50,6 +55,10 @@ node scripts/aiwp-migrate.mjs build --out bundle.json --categories conversations
 ```
 
 The bundle contract is in [docs/bundle-format.md](docs/bundle-format.md); the importer lives in AI Workforce Pro (`packages/api/src/migration`).
+
+### Session transcripts (0.3.0)
+
+Cowork and desktop Code session transcripts are read with `--session <file|folder>` or `inputs/sessions.json`. Rows a teleport appends locally (`/export`, shell commands) are dropped. Staged `sessions.json` entries without a transcript are reported as expected but not collected.
 
 ### Export fidelity fixes (0.2.1)
 

@@ -64,6 +64,13 @@ const toConversation = (chat, index) => {
   };
 };
 
+const toSession = (dir) => (entry, index) => ({
+  ...(entry.path ? { path: path.resolve(dir, entry.path) } : {}),
+  ...(entry.id ? { id: String(entry.id) } : {}),
+  title: entry.title ?? entry.id ?? `Session ${index + 1}`,
+  ...(entry.projectId ? { projectId: String(entry.projectId) } : {}),
+});
+
 const toMemory = (memory, index) => ({
   id: String(memory?.id ?? `memory-${index + 1}`),
   value: (typeof memory === 'string' ? memory : (memory.value ?? memory.text ?? memory.content ?? '')).trim(),
@@ -72,15 +79,16 @@ const toMemory = (memory, index) => ({
 
 /**
  * Reads the files Claude writes into the staging folder while it gathers data
- * only it can reach (its memory, scheduled tasks, artifact list).
+ * only it can reach (its memory, scheduled tasks, artifact list, session transcripts).
  */
 export const readStaged = async (dir) => {
   if (!dir) {
-    return { projects: [], conversations: [], memories: [], scheduledTasks: [], artifacts: [] };
+    return { projects: [], conversations: [], sessions: [], memories: [], scheduledTasks: [], artifacts: [] };
   }
-  const [projects, chats, memories, tasks, artifacts] = await Promise.all([
+  const [projects, chats, sessions, memories, tasks, artifacts] = await Promise.all([
     readOptional(dir, 'projects.json'),
     readOptional(dir, 'conversations.json'),
+    readOptional(dir, 'sessions.json'),
     readOptional(dir, 'memories.json'),
     readOptional(dir, 'scheduled-tasks.json'),
     readOptional(dir, 'artifacts.json'),
@@ -90,6 +98,7 @@ export const readStaged = async (dir) => {
     conversations: asList(chats, 'conversations')
       .map(toConversation)
       .filter((chat) => chat.messages.length > 0),
+    sessions: asList(sessions, 'sessions').map(toSession(dir)),
     memories: asList(memories, 'memories').map(toMemory).filter((memory) => memory.value),
     scheduledTasks: asList(tasks, 'tasks').map(toTask).filter((task) => task.prompt),
     artifacts: asList(artifacts, 'artifacts').map(toArtifact).filter((artifact) => artifact.content.trim()),

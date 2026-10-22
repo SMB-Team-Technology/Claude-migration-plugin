@@ -5,9 +5,9 @@ import { parseArgs } from 'node:util';
 import { CATEGORIES, collect, summarize, select, makeBundle, validateBundle } from './lib/bundle.mjs';
 
 const USAGE = `Usage:
-  aiwp-migrate.mjs scan  [--export <zip|dir|json>] [--inputs <dir>] [--skills-dir <dir>]...
+  aiwp-migrate.mjs scan  [--export <zip|dir|json>] [--inputs <dir>] [--session <jsonl|dir>]... [--skills-dir <dir>]...
   aiwp-migrate.mjs build --out <file> [--categories a,b] [--exclude id,id] [--allow-flagged]
-                         [--export ...] [--inputs ...] [--skills-dir ...]
+                         [--export ...] [--inputs ...] [--session ...] [--skills-dir ...]
   aiwp-migrate.mjs validate <file>
 
 Categories: ${CATEGORIES.join(', ')}`;
@@ -15,6 +15,7 @@ Categories: ${CATEGORIES.join(', ')}`;
 const options = {
   export: { type: 'string' },
   inputs: { type: 'string' },
+  session: { type: 'string', multiple: true },
   'skills-dir': { type: 'string', multiple: true },
   'no-local-skills': { type: 'boolean' },
   categories: { type: 'string' },
@@ -28,6 +29,7 @@ const csv = (value) => (value ? value.split(',').map((part) => part.trim()).filt
 const sourcesFrom = (values) => ({
   exportPath: values.export,
   inputsDir: values.inputs,
+  sessionPaths: values.session,
   skillDirs: values['skills-dir'],
   skipLocalSkills: values['no-local-skills'],
 });
@@ -37,14 +39,15 @@ const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}
 const coverage = (values, collected) => ({
   verifiedAtDestination: false,
   warnings: [
-    'Cloud exports do not establish coverage of local Cowork projects or sessions. Stage local data from verified sources separately.',
+    'Cloud exports include Chat-mode conversations only. Cowork and Code sessions are covered only when their transcripts are staged (see sessions.json).',
+    ...collected.sourceWarnings,
     'Project files, attachments and connectors are not migrated. Projects contain instructions and text context only.',
     ...CATEGORIES.filter((category) => collected[category].length === 0)
       .map((category) => `No ${category} collected; this is not proof that the source account has none.`),
     ...collected.projects.flatMap((project) => project.migrationWarnings ?? []),
     ...collected.conversations.flatMap((chat) => (chat.migrationWarnings ?? []).map((warning) => `${chat.title}: ${warning}`)),
   ],
-  sources: { export: values.export ?? null, staged: values.inputs ?? null },
+  sources: { export: values.export ?? null, staged: values.inputs ?? null, sessions: values.session ?? [] },
 });
 
 const commands = {

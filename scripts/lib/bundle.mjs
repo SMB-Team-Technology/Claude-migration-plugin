@@ -1,12 +1,14 @@
+import { stat } from 'node:fs/promises';
 import { findSecret } from './secrets.mjs';
 import { readExport, toBundleConversation, extractArtifacts, extractMemories } from './sources/export.mjs';
 import { scanSkills, defaultSkillDirs } from './sources/skills.mjs';
 import { readStaged } from './sources/staged.mjs';
 import { toProject } from './sources/projects.mjs';
+import { readSessions, linkSessionProjects } from './sources/sessions.mjs';
 
 export const BUNDLE_FORMAT = 'claude-migration-bundle';
 export const BUNDLE_VERSION = 1;
-export const GENERATOR = { name: 'claude-migration-plugin', version: '0.2.1' };
+export const GENERATOR = { name: 'claude-migration-plugin', version: '0.3.0' };
 
 export const CATEGORIES = ['projects', 'conversations', 'memories', 'skills', 'scheduledTasks', 'artifacts'];
 
@@ -43,25 +45,61 @@ const mergeById = (preferred, others) => {
   return [...preferred, ...others.filter((item) => !seen.has(item.id))];
 };
 
+const exists = (file) => stat(file).then(() => true, () => false);
+
+/** Splits staged session entries into transcript paths (with their overrides) and entries that name no readable file. */
+const stagedSessions = async (entries) => {
+  const found = await Promise.all(entries.map((entry) => (entry.path ? exists(entry.path) : false)));
+  return {
+    paths: entries.filter((_, index) => found[index]).map((entry) => entry.path),
+    overrides: new Map(entries.filter((_, index) => found[index]).map(({ path: file, ...rest }) => [file, rest])),
+    unread: entries.filter((_, index) => !found[index]),
+  };
+};
+
+/** Applies staged titles/projects to chats matched by id; entries matching nothing are reported as not collected. */
+const reconcileSessions = (chats, unread) => {
+  const byId = new Map(unread.filter((entry) => entry.id).map((entry) => [entry.id, entry]));
+  const matched = new Set();
+  const updated = chats.map((chat) => {
+    const entry = byId.get(chat.id);
+    if (!entry) return chat;
+    matched.add(entry);
+    const { sourceProjectName, ...rest } = chat;
+    return entry.projectId
+      ? { ...rest, title: entry.title, projectId: entry.projectId }
+      : { ...chat, title: entry.title };
+  });
+  const missing = unread
+    .filter((entry) => !matched.has(entry))
+    .map((entry) => `Expected session "${entry.title}"${entry.id && entry.id !== entry.title ? ` (${entry.id})` : ''} was not collected: ${entry.path ? 'transcript not found' : 'no transcript was staged'}.`);
+  return { chats: updated, missing };
+};
+
 /** Reads every source the options point at and returns the full, unfiltered set per category. */
 export const collect = async (options = {}) => {
   const exported = options.exportPath ? await readExport(options.exportPath) : {};
   const rawConversations = Array.isArray(exported.conversations) ? exported.conversations : [];
   const staged = await readStaged(options.inputsDir);
   const skillRoots = options.skillDirs?.length ? options.skillDirs : defaultSkillDirs();
+  const sessionSources = await stagedSessions(staged.sessions);
+  const read = await readSessions([...(options.sessionPaths ?? []), ...sessionSources.paths], sessionSources.overrides);
+  const sessions = reconcileSessions(read, sessionSources.unread);
 
+  const projects = mergeById(staged.projects, (exported.projects ?? []).map(toProject));
   const exportedMemories = extractMemories(exported.memories);
   const exportedArtifacts = extractArtifacts(rawConversations);
   return {
-    projects: mergeById(staged.projects, (exported.projects ?? []).map(toProject)),
+    projects,
     conversations: mergeById(
-      staged.conversations,
+      mergeById(staged.conversations, linkSessionProjects(sessions.chats, projects)),
       rawConversations.map(toBundleConversation).filter((chat) => chat.messages.length > 0),
     ),
     memories: [...staged.memories, ...exportedMemories],
     skills: options.skipLocalSkills ? [] : await scanSkills(skillRoots),
     scheduledTasks: staged.scheduledTasks,
     artifacts: [...staged.artifacts, ...exportedArtifacts],
+    sourceWarnings: sessions.missing,
   };
 };
 

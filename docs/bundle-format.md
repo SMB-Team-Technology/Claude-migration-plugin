@@ -9,7 +9,7 @@ Every category is optional and omitted when empty. Every item has an `id` that i
   "format": "claude-migration-bundle",
   "version": 1,
   "createdAt": "2026-10-19T12:00:00.000Z",
-  "generator": { "name": "claude-migration-plugin", "version": "0.2.1" },
+  "generator": { "name": "claude-migration-plugin", "version": "0.3.0" },
 
   "migrationWarnings": ["Local Cowork coverage must be verified separately"],
   "projects": [{ "id": "project-uuid", "name": "Client", "description": "Migration", "instructions": "…", "context": "…" }],
@@ -51,7 +51,9 @@ Every category is optional and omitted when empty. Every item has an `id` that i
 
 ## Staging files (plugin input, not part of the bundle)
 
-Claude can stage `projects.json`, `conversations.json`, `memories.json`, `scheduled-tasks.json` and `artifacts.json` in the inputs folder for data only it can reach. `conversations.json` takes the bundle's conversation shape (`role` may also be `human`). A staged chat or project replaces an export record with the same id. Projects require stable `id`, `name`, `instructions` and `context` text (the latter two default to empty). `projectId` references the source project ID, not a destination database ID.
+Claude can stage `projects.json`, `conversations.json`, `sessions.json`, `memories.json`, `scheduled-tasks.json` and `artifacts.json` in the inputs folder for data only it can reach.
+
+`sessions.json` lists Claude Code / Cowork session transcripts: `[{ "path": "transcript.jsonl", "id": "session_…", "title": "Harlow & Pike test data setup", "projectId": "<source project id>" }]`. `path` is relative to the inputs folder. Transcripts passed with `--session` are matched to entries by `id`. `title` and `projectId` override what the transcript provides. An entry that matches no transcript is reported as an expected session that was not collected. Session chats use the remote `session_…` ID when the transcript carries one, otherwise the transcript's session ID. `conversations.json` takes the bundle's conversation shape (`role` may also be `human`). A staged chat or project replaces an export record with the same id. Projects require stable `id`, `name`, `instructions` and `context` text (the latter two default to empty). `projectId` references the source project ID, not a destination database ID.
 
 ## Project compatibility and limitations
 
