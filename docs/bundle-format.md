@@ -9,9 +9,12 @@ Every category is optional and omitted when empty. Every item has an `id` that i
   "format": "claude-migration-bundle",
   "version": 1,
   "createdAt": "2026-10-19T12:00:00.000Z",
-  "generator": { "name": "claude-migration-plugin", "version": "0.1.0" },
+  "generator": { "name": "claude-migration-plugin", "version": "0.7.0" },
 
+  "migrationWarnings": ["Local Cowork coverage must be verified separately"],
+  "projects": [{ "id": "project-uuid", "name": "Client", "description": "Migration", "instructions": "…", "context": "…" }],
   "conversations": [{
+    "projectId": "project-uuid", // optional; select the project with its chats
     "id": "uuid", "title": "Lease review",
     "createdAt": "ISO-8601", "updatedAt": "ISO-8601",
     "messages": [{ "role": "user | assistant", "text": "…", "thinking": "assistant only", "createdAt": "ISO-8601" }]
@@ -48,4 +51,16 @@ Every category is optional and omitted when empty. Every item has an `id` that i
 
 ## Staging files (plugin input, not part of the bundle)
 
-Claude can stage `conversations.json`, `memories.json`, `scheduled-tasks.json` and `artifacts.json` in the inputs folder for data only it can reach. `conversations.json` takes the bundle's conversation shape (`role` may also be `human`). A staged chat replaces an export chat with the same id.
+Claude can stage `projects.json`, `conversations.json`, `sessions.json`, `memories.json`, `scheduled-tasks.json` and `artifacts.json` in the inputs folder for data only it can reach.
+
+`sessions.json` lists Claude Code / Cowork session transcripts: `[{ "path": "transcript.jsonl", "id": "session_…", "title": "Harlow & Pike test data setup", "projectId": "<source project id>" }]`. `path` is relative to the inputs folder. Transcripts passed with `--session` are matched to entries by `id`. `title` and `projectId` override what the transcript provides. An entry that matches no transcript is reported as an expected session that was not collected. Session chats use the remote `session_…` ID when the transcript carries one, otherwise the transcript's session ID. `conversations.json` takes the bundle's conversation shape (`role` may also be `human`). A staged chat or project replaces an export record with the same id. Projects require stable `id`, `name`, `instructions` and `context` text (the latter two default to empty). `projectId` references the source project ID, not a destination database ID.
+
+## Project compatibility and limitations
+
+Projects are an optional v1 extension and require an updated AIWP server. Older importers ignore them, so upgrade AIWP before using project bundles. Import projects before chats and select both. Missing, unselected, conflicting or failed projects cause their linked chats to be skipped with a reason, rather than imported without their project. Existing source projects are recognized by a user-scoped migration identity; same-name unrelated projects are not merged or overwritten.
+
+Project names are limited to 128 characters; instructions and context to 100,000 characters each. Project files, attachments and connectors are **not** migrated; do not turn binary files into invented text context. `migrationWarnings` carries coverage limitations through preview and import results. Source adapters recognize explicit project `id`/`uuid`, `name`, `instructions`/`prompt_template`, and optional text `context`; other layouts require verified staging rather than guessing.
+
+The helper rejects indexes and empty/mismatched payloads. A successful build reports collected counts, not source-account completeness or destination verification.
+
+Project `description` is optional text, limited to 100,000 characters, stored separately from instructions/context. Individual Claude project objects with `uuid`, `name` and `prompt_template` are accepted directly; UUID-named project records are discovered within export folders and archives. `users.json` is ignored. Structured step display cards are converted to ordered Markdown; fidelity limitations are included in `migrationWarnings`.

@@ -11,6 +11,22 @@ const BINARY_EXTENSIONS = new Set([
 
 export const defaultSkillDirs = () => [path.join(os.homedir(), '.claude', 'skills')];
 
+/** Skill origin from the desktop sync manifest: the user's own, provided by their team, or a Claude built-in. */
+const ORIGINS = { custom: 'mine', plugin: 'team', anthropic: 'claude', 'anthropic-example': 'claude' };
+
+const readOrigins = async (dir) => {
+  const manifest = await readFile(path.join(dir, 'manifest.json'), 'utf8').then(JSON.parse, () => null);
+  const skills = Array.isArray(manifest?.skills) ? manifest.skills : [];
+  return new Map(skills.filter((skill) => typeof skill?.name === 'string').map((skill) => [skill.name, ORIGINS[skill.source] ?? 'mine']));
+};
+
+/** A root plus the desktop app's synced skill folders inside it (`synced/<organization>/`). */
+const expandRoot = async (root) => {
+  const synced = path.join(root, 'synced');
+  const buckets = await readdir(synced, { withFileTypes: true }).catch(() => []);
+  return [root, ...buckets.filter((entry) => entry.isDirectory()).map((entry) => path.join(synced, entry.name))];
+};
+
 const frontmatter = (content) => {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
@@ -65,15 +81,18 @@ const readSkill = async (dir) => {
   return { id: name, name, description: meta.description || name, content, files: await readSupportingFiles(dir) };
 };
 
-/** Finds skills (folders containing SKILL.md) in the given roots; the first skill of a name wins. */
+/**
+ * Finds skills (folders containing SKILL.md) in the given roots, including desktop-synced skills,
+ * labelled with their origin. The first skill of a name wins.
+ */
 export const scanSkills = async (roots) => {
   const found = new Map();
-  for (const root of roots) {
-    const names = await readdir(root).catch(() => []);
-    const skills = await Promise.all(names.map((name) => readSkill(path.join(root, name))));
+  for (const root of (await Promise.all(roots.map(expandRoot))).flat()) {
+    const [names, origins] = await Promise.all([readdir(root).catch(() => []), readOrigins(root)]);
+    const skills = await Promise.all(names.filter((name) => name !== 'synced').map((name) => readSkill(path.join(root, name))));
     for (const skill of skills.filter(Boolean)) {
       if (!found.has(skill.name)) {
-        found.set(skill.name, skill);
+        found.set(skill.name, { ...skill, origin: origins.get(skill.name) ?? origins.get(path.basename(skill.id)) ?? 'mine' });
       }
     }
   }

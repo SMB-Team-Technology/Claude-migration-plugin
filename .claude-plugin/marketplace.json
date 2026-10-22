@@ -5,7 +5,7 @@
     {
       "name": "claude-migration",
       "source": "./",
-      "description": "Export your Claude chats, memories, skills, scheduled tasks and artifacts for import into AI Workforce Pro."
+      "description": "Export your Claude projects, chats, memories, skills, scheduled tasks and artifacts for import into AI Workforce Pro."
     }
   ]
 }

@@ -1,9 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { toBundleConversation } from './export.mjs';
+import { toProject } from './projects.mjs';
 
 const readOptional = async (dir, name) => {
-  const text = await readFile(path.join(dir, name), 'utf8').catch(() => null);
+  const text = await readFile(path.join(dir, name), 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
   if (text === null) {
     return undefined;
   }
@@ -16,8 +20,14 @@ const readOptional = async (dir, name) => {
 
 const asList = (raw, key) => (Array.isArray(raw) ? raw : (raw?.[key] ?? []));
 
+/** Cloud routines report `CRON_TZ=<zone> <5 fields>`; AIWP wants the schedule and the zone separately. */
+const splitCronZone = (value) => {
+  const match = typeof value === 'string' ? value.trim().match(/^CRON_TZ=(\S+)\s+(.+)$/) : null;
+  return match ? { cron: match[2].trim(), zone: match[1] } : { cron: value, zone: undefined };
+};
+
 const toTask = (task, index) => {
-  const cron = task.cron ?? task.cronExpression ?? task.cron_expression;
+  const { cron, zone } = splitCronZone(task.cron ?? task.cronExpression ?? task.cron_expression);
   const runAt = task.runAt ?? task.run_once_at ?? task.fireAt;
   return {
     id: String(task.id ?? task.taskId ?? `task-${index + 1}`),
@@ -26,7 +36,7 @@ const toTask = (task, index) => {
     scheduleType: cron ? 'recurring' : 'once',
     ...(cron ? { cron } : {}),
     ...(!cron && runAt ? { runAt } : {}),
-    timezone: task.timezone ?? task.tz ?? 'UTC',
+    timezone: task.timezone ?? task.tz ?? zone ?? 'UTC',
     enabled: task.enabled !== false,
   };
 };
@@ -54,10 +64,19 @@ const toConversation = (chat, index) => {
   return {
     id: String(chat.id ?? chat.uuid ?? `chat-${index + 1}`),
     title: (chat.title ?? chat.name ?? '').trim() || 'Imported Claude chat',
+    ...(chat.projectId ? { projectId: chat.projectId } : {}),
     ...(chat.createdAt ?? chat.created_at ? { createdAt: chat.createdAt ?? chat.created_at } : {}),
     messages,
   };
 };
+
+const toSession = (dir) => (entry, index) => ({
+  ...(entry.path ? { path: path.resolve(dir, entry.path) } : {}),
+  ...(entry.id ? { id: String(entry.id) } : {}),
+  label: entry.title ?? entry.id ?? `Session ${index + 1}`,
+  ...(entry.title ? { title: String(entry.title) } : {}),
+  ...(entry.projectId ? { projectId: String(entry.projectId) } : {}),
+});
 
 const toMemory = (memory, index) => ({
   id: String(memory?.id ?? `memory-${index + 1}`),
@@ -67,22 +86,26 @@ const toMemory = (memory, index) => ({
 
 /**
  * Reads the files Claude writes into the staging folder while it gathers data
- * only it can reach (its memory, scheduled tasks, artifact list).
+ * only it can reach (its memory, scheduled tasks, artifact list, session transcripts).
  */
 export const readStaged = async (dir) => {
   if (!dir) {
-    return { conversations: [], memories: [], scheduledTasks: [], artifacts: [] };
+    return { projects: [], conversations: [], sessions: [], memories: [], scheduledTasks: [], artifacts: [] };
   }
-  const [chats, memories, tasks, artifacts] = await Promise.all([
+  const [projects, chats, sessions, memories, tasks, artifacts] = await Promise.all([
+    readOptional(dir, 'projects.json'),
     readOptional(dir, 'conversations.json'),
+    readOptional(dir, 'sessions.json'),
     readOptional(dir, 'memories.json'),
     readOptional(dir, 'scheduled-tasks.json'),
     readOptional(dir, 'artifacts.json'),
   ]);
   return {
+    projects: asList(projects, 'projects').map(toProject),
     conversations: asList(chats, 'conversations')
       .map(toConversation)
       .filter((chat) => chat.messages.length > 0),
+    sessions: asList(sessions, 'sessions').map(toSession(dir)),
     memories: asList(memories, 'memories').map(toMemory).filter((memory) => memory.value),
     scheduledTasks: asList(tasks, 'tasks').map(toTask).filter((task) => task.prompt),
     artifacts: asList(artifacts, 'artifacts').map(toArtifact).filter((artifact) => artifact.content.trim()),

@@ -47,7 +47,7 @@ test('readZip reads deflated entries', () => {
 
 test('collect normalises conversations, replays artifact edits, and skips empty chats', async () => {
   const { zip, skills, inputs } = await workspace();
-  const collected = await collect({ exportPath: zip, skillDirs: [skills], inputsDir: inputs });
+  const collected = await collect({ exportPath: zip, skillDirs: [skills], inputsDir: inputs, skipLocalMemories: true });
 
   assert.equal(collected.conversations.length, 1);
   const [chat] = collected.conversations;
@@ -66,7 +66,7 @@ test('collect normalises conversations, replays artifact edits, and skips empty 
 
 test('select honours categories and exclusions, and holds back credentials', async () => {
   const { zip, skills, inputs } = await workspace();
-  const collected = await collect({ exportPath: zip, skillDirs: [skills], inputsDir: inputs });
+  const collected = await collect({ exportPath: zip, skillDirs: [skills], inputsDir: inputs, skipLocalMemories: true });
 
   const summary = summarize(collected);
   assert.equal(summary.skills.flagged, 1);
@@ -121,12 +121,12 @@ test('staged conversations work without an export and win over export duplicates
     ]),
   );
 
-  const only = await collect({ inputsDir: inputs, skipLocalSkills: true });
+  const only = await collect({ inputsDir: inputs, skipLocalSkills: true, skipLocalMemories: true });
   assert.deepEqual(only.conversations.map((c) => [c.id, c.title, c.messages.map((m) => m.role)]), [
     ['c1', 'From tools', ['user', 'assistant']],
   ]);
 
-  const merged = await collect({ inputsDir: inputs, exportPath: zip, skipLocalSkills: true });
+  const merged = await collect({ inputsDir: inputs, exportPath: zip, skipLocalSkills: true, skipLocalMemories: true });
   assert.equal(merged.conversations.length, 1);
   assert.equal(merged.conversations[0].title, 'From tools');
 });

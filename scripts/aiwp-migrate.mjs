@@ -1,13 +1,18 @@
 #!/usr/bin/env node
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { homedir } from 'node:os';
 import { CATEGORIES, collect, summarize, select, makeBundle, validateBundle } from './lib/bundle.mjs';
+import { downloadExport } from './lib/download.mjs';
+import { listSessions, fetchAllCommand, addKnownSessions, PENDING_FILE } from './lib/sources/desktop.mjs';
 
 const USAGE = `Usage:
-  aiwp-migrate.mjs scan  [--export <zip|dir|json>] [--inputs <dir>] [--skills-dir <dir>]...
-  aiwp-migrate.mjs build --out <file> [--categories a,b] [--exclude id,id] [--allow-flagged]
-                         [--export ...] [--inputs ...] [--skills-dir ...]
+  aiwp-migrate.mjs sessions [--add "<claude.ai/cowork links or session IDs>"] [--add-file <file>]
+  aiwp-migrate.mjs download [--manifest <member-manifest-….json>] [--dir <folder, default ~/Downloads>] [--wait <seconds>]
+  aiwp-migrate.mjs scan  [--export <zip|dir|json>] [--inputs <dir>] [--session <jsonl|dir>]... [--skills-dir <dir>]...
+  aiwp-migrate.mjs build --out <file> [--categories a,b] [--exclude id,id] [--allow-flagged] [--include-builtin-skills]
+                         [--export ...] [--inputs ...] [--session ...] [--skills-dir ...]
   aiwp-migrate.mjs validate <file>
 
 Categories: ${CATEGORIES.join(', ')}`;
@@ -15,12 +20,20 @@ Categories: ${CATEGORIES.join(', ')}`;
 const options = {
   export: { type: 'string' },
   inputs: { type: 'string' },
+  session: { type: 'string', multiple: true },
   'skills-dir': { type: 'string', multiple: true },
   'no-local-skills': { type: 'boolean' },
+  'no-local-memories': { type: 'boolean' },
+  'include-builtin-skills': { type: 'boolean' },
   categories: { type: 'string' },
   exclude: { type: 'string' },
   'allow-flagged': { type: 'boolean' },
   out: { type: 'string' },
+  manifest: { type: 'string' },
+  dir: { type: 'string' },
+  wait: { type: 'string' },
+  add: { type: 'string' },
+  'add-file': { type: 'string' },
 };
 
 const csv = (value) => (value ? value.split(',').map((part) => part.trim()).filter(Boolean) : undefined);
@@ -28,15 +41,74 @@ const csv = (value) => (value ? value.split(',').map((part) => part.trim()).filt
 const sourcesFrom = (values) => ({
   exportPath: values.export,
   inputsDir: values.inputs,
+  sessionPaths: values.session,
   skillDirs: values['skills-dir'],
   skipLocalSkills: values['no-local-skills'],
+  skipLocalMemories: values['no-local-memories'],
 });
+
+/** The git repository containing `dir`, if any: private bundles must never land in a code repository. */
+const gitRoot = async (dir) => {
+  for (let current = dir; ; current = path.dirname(current)) {
+    if (await stat(path.join(current, '.git')).then(() => true, () => false)) return current;
+    if (path.dirname(current) === current) return null;
+  }
+};
 
 const print = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 
+const coverage = (values, collected) => ({
+  verifiedAtDestination: false,
+  warnings: [
+    'Cloud exports include Chat-mode conversations only. Cowork and Code sessions are covered only when their transcripts are staged (see sessions.json).',
+    ...collected.sourceWarnings,
+    'Project files, attachments and connectors are not migrated. Projects contain instructions and text context only.',
+    ...CATEGORIES.filter((category) => collected[category].length === 0)
+      .map((category) => `No ${category} collected; this is not proof that the source account has none.`),
+    ...collected.projects.flatMap((project) => project.migrationWarnings ?? []),
+    ...collected.conversations.flatMap((chat) => (chat.migrationWarnings ?? []).map((warning) => `${chat.title}: ${warning}`)),
+  ],
+  sources: { export: values.export ?? null, staged: values.inputs ?? null, sessions: values.session ?? [] },
+});
+
 const commands = {
+  async sessions(values) {
+    if (process.platform !== 'darwin') {
+      print({ cowork: [], code: [], notice: 'Listing desktop sessions is supported on macOS only for now.' });
+      return;
+    }
+    const pasted = [values.add ?? '', values['add-file'] ? await readFile(values['add-file'], 'utf8') : ''].join('\n');
+    const addedNow = pasted.trim() ? await addKnownSessions(homedir(), pasted) : null;
+    const listed = await listSessions({ home: homedir(), ...(process.env.CLAUDE_CONFIG_DIR ? { configDir: process.env.CLAUDE_CONFIG_DIR } : {}) });
+    const pending = listed.cowork.filter((session) => !session.collected).map((session) => session.id);
+    const canFetch = listed.claude && (await access('/usr/bin/expect').then(() => true, () => false));
+    if (pending.length > 0 && canFetch) {
+      await mkdir(listed.teleportFolder, { recursive: true });
+      await writeFile(path.join(listed.teleportFolder, PENDING_FILE), `${pending.join('\n')}\n`);
+    }
+    print({
+      ...listed,
+      pending: pending.length,
+      ...(addedNow ? { addedNow } : {}),
+      ...(pending.length > 0 && canFetch ? { fetchAll: fetchAllCommand(listed) } : {}),
+    });
+  },
+
+  async download(values) {
+    const waitSeconds = values.wait ? Number(values.wait) : undefined;
+    if (waitSeconds !== undefined && !(waitSeconds >= 0)) {
+      throw new Error('--wait must be a number of seconds');
+    }
+    print(await downloadExport({
+      dir: path.resolve(values.dir ?? path.join(homedir(), 'Downloads')),
+      manifestPath: values.manifest ? path.resolve(values.manifest) : undefined,
+      waitSeconds,
+    }));
+  },
+
   async scan(values) {
-    print(summarize(await collect(sourcesFrom(values))));
+    const collected = await collect(sourcesFrom(values));
+    print({ categories: summarize(collected), coverage: coverage(values, collected) });
   },
 
   async build(values) {
@@ -48,19 +120,31 @@ const commands = {
     if (unknown.length > 0) {
       throw new Error(`Unknown categories: ${unknown.join(', ')}`);
     }
-    const { chosen, skipped } = select(await collect(sourcesFrom(values)), {
+    const out = path.resolve(values.out);
+    const repo = await gitRoot(path.dirname(out));
+    if (repo) {
+      throw new Error(`Refusing to save the bundle inside the code repository ${repo}: it holds private data. Save it in ~/Downloads instead.`);
+    }
+    const collected = await collect(sourcesFrom(values));
+    const report = coverage(values, collected);
+    const { chosen, skipped } = select(collected, {
       categories,
       exclude: csv(values.exclude),
       allowFlagged: values['allow-flagged'],
+      includeBuiltinSkills: values['include-builtin-skills'],
     });
-    const bundle = validateBundle(makeBundle(chosen));
-    const out = path.resolve(values.out);
+    if (!CATEGORIES.some((category) => chosen[category].length > 0)) {
+      throw new Error('No selected data to export. Check payloads, staged sources and credential exclusions.');
+    }
+    const bundle = validateBundle({ ...makeBundle(chosen), migrationWarnings: report.warnings });
     await mkdir(path.dirname(out), { recursive: true });
     await writeFile(out, JSON.stringify(bundle), { mode: 0o600 });
     print({
       file: out,
       counts: Object.fromEntries(CATEGORIES.map((category) => [category, chosen[category].length])),
       skippedForCredentials: skipped,
+      coverage: report,
+      status: 'Bundle created; destination import is not verified',
     });
   },
 
