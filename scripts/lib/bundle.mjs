@@ -1,20 +1,23 @@
 import { stat } from 'node:fs/promises';
 import { findSecret } from './secrets.mjs';
-import { readExport, toBundleConversation, extractArtifacts, extractMemories } from './sources/export.mjs';
+import { readExport, toBundleConversation, extractArtifacts, extractMemories, extractProjectMemories } from './sources/export.mjs';
 import { scanSkills, defaultSkillDirs } from './sources/skills.mjs';
 import { scanMemories } from './sources/memory.mjs';
 import { readStaged } from './sources/staged.mjs';
-import { toProject } from './sources/projects.mjs';
+import { toProject, withMemory } from './sources/projects.mjs';
 import { readSessions, linkSessionProjects } from './sources/sessions.mjs';
 
 export const BUNDLE_FORMAT = 'claude-migration-bundle';
 export const BUNDLE_VERSION = 1;
 export const GENERATOR = { name: 'claude-migration-plugin', version: '0.7.0' };
 
+/** Room for the "## Memory from Claude" heading AIWP puts between context and memory. */
+const PROJECT_MEMORY_OVERHEAD = 30;
+
 export const CATEGORIES = ['projects', 'conversations', 'memories', 'skills', 'scheduledTasks', 'artifacts'];
 
 const itemText = {
-  projects: (item) => `${item.description ?? ''}\n${item.instructions}\n${item.context}`,
+  projects: (item) => `${item.description ?? ''}\n${item.instructions}\n${item.context}\n${item.memory ?? ''}`,
   conversations: (item) => item.messages.map((message) => `${message.text}\n${message.thinking ?? ''}`).join('\n'),
   memories: (item) => item.value,
   skills: (item) => [item.content, ...item.files.map((file) => file.content)].join('\n'),
@@ -92,6 +95,15 @@ const inventoryWarnings = (inventory = [], artifacts) => {
   ];
 };
 
+/** Project memory whose project is not in the bundle cannot be placed, so it is named rather than dropped silently. */
+const unmatchedMemoryWarnings = (projectMemories, projects) => {
+  const known = new Set(projects.map((project) => project.id));
+  const missing = [...projectMemories.keys()].filter((id) => !known.has(id));
+  return missing.length
+    ? [`Project memory for ${missing.length} project(s) was left out because those projects are not in the export: ${missing.join(', ')}`]
+    : [];
+};
+
 /** Reads every source the options point at and returns the full, unfiltered set per category. */
 export const collect = async (options = {}) => {
   const exported = options.exportPath ? await readExport(options.exportPath) : {};
@@ -102,7 +114,9 @@ export const collect = async (options = {}) => {
   const read = await readSessions([...(options.sessionPaths ?? []), ...sessionSources.paths], sessionSources.overrides);
   const sessions = reconcileSessions(read, sessionSources.unread);
 
-  const projects = mergeById(staged.projects, (exported.projects ?? []).map(toProject));
+  const projectMemories = extractProjectMemories(exported.memories);
+  const projects = mergeById(staged.projects, (exported.projects ?? []).map(toProject))
+    .map((project) => withMemory(project, projectMemories.get(project.id)));
   const exportedMemories = extractMemories(exported.memories);
   const exportedArtifacts = extractArtifacts(rawConversations);
   const artifacts = [...staged.artifacts, ...exportedArtifacts];
@@ -112,11 +126,11 @@ export const collect = async (options = {}) => {
       mergeById(staged.conversations, linkSessionProjects(sessions.chats, projects)),
       rawConversations.map(toBundleConversation).filter((chat) => chat.messages.length > 0),
     ),
-    memories: mergeById(staged.memories, [...(options.skipLocalMemories ? [] : await scanMemories(options.projectsDir)), ...exportedMemories]),
+    memories: mergeById(staged.memories, [...exportedMemories, ...(options.skipLocalMemories ? [] : await scanMemories(options.projectsDir))]),
     skills: options.skipLocalSkills ? [] : await scanSkills(skillRoots),
     scheduledTasks: staged.scheduledTasks,
     artifacts,
-    sourceWarnings: [...sessions.missing, ...inventoryWarnings(exported.artifactInventory, artifacts)],
+    sourceWarnings: [...sessions.missing, ...inventoryWarnings(exported.artifactInventory, artifacts), ...unmatchedMemoryWarnings(projectMemories, projects)],
   };
 };
 
@@ -210,6 +224,8 @@ export const validateBundle = (bundle) => {
         if (item.name.length > 128) return [`${label} name exceeds 128 characters`];
         if (item.instructions.length > 100_000) return [`${label} instructions exceed 100000 characters`];
         if (item.context.length > 100_000) return [`${label} context exceeds 100000 characters`];
+        if (item.memory !== undefined && typeof item.memory !== 'string') return [`${label} memory must be text`];
+        if (item.memory && item.memory.length + item.context.length + PROJECT_MEMORY_OVERHEAD > 100_000) return [`${label} context and memory together exceed 100000 characters`];
       }
       if (category === 'conversations' && item.projectId !== undefined && (typeof item.projectId !== 'string' || !item.projectId || item.projectId.length > 300)) {
         return [`${label} projectId must be a nonempty source ID of at most 300 characters`];
