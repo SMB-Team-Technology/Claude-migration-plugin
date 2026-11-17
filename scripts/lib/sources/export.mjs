@@ -273,15 +273,39 @@ const splitLines = (text) =>
     .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
     .filter((line) => line.length >= 8);
 
-/** Accepts the shapes a memories export plausibly takes: an array of strings/objects, or an object of prose fields. */
+const isRecord = (value) => value && typeof value === 'object' && !Array.isArray(value);
+
+const ID_FIELD = /(?:^|_)(?:uuid|id)$/i;
+
+/** String fields of a record that hold prose, skipping identifiers such as `account_uuid`. */
+const proseFields = (entry) => Object.entries(entry)
+  .filter(([key, value]) => typeof value === 'string' && !ID_FIELD.test(key))
+  .map(([, value]) => value);
+
+/** A prose-fields record (for example `conversations_memory`) rather than one memory object. */
+const isProseRecord = (entry) => isRecord(entry) && !memoryText(entry) && proseFields(entry).length > 0;
+
+const entryValues = (entry) => (isProseRecord(entry)
+  ? proseFields(entry).flatMap(splitLines)
+  : [memoryText(entry)].filter(Boolean));
+
+/** Accepts the shapes a memories export plausibly takes: an array of strings/objects, or records of prose fields. */
 export const extractMemories = (raw) => {
   if (!raw) {
     return [];
   }
-  const values = Array.isArray(raw)
-    ? raw.map(memoryText).filter(Boolean)
-    : Object.values(raw)
-        .filter((value) => typeof value === 'string')
-        .flatMap(splitLines);
+  const values = (Array.isArray(raw) ? raw : [raw]).flatMap(entryValues);
   return values.map((value, index) => ({ id: `memory-${index + 1}`, value: value.trim() }));
+};
+
+/** Reads per-project memory (`project_memories`: project id → text) from the same export records. */
+export const extractProjectMemories = (raw) => {
+  const memories = new Map();
+  for (const entry of Array.isArray(raw) ? raw : [raw]) {
+    if (!isRecord(entry?.project_memories)) continue;
+    for (const [id, value] of Object.entries(entry.project_memories)) {
+      if (typeof value === 'string' && value.trim()) memories.set(id, value.trim());
+    }
+  }
+  return memories;
 };

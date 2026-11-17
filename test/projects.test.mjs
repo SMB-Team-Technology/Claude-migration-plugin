@@ -93,3 +93,40 @@ test('build reports coverage, carries warnings and refuses an empty bundle', asy
   assert.match(result.coverage.warnings[0], /Cowork/);
   await assert.rejects(run('node', ['scripts/aiwp-migrate.mjs', 'build', '--no-local-skills', '--no-local-memories', '--out', path.join(dir, 'empty.json')]), /No selected data/);
 });
+
+test('project memory from the export attaches to its project, and global memory comes first', async () => {
+  const dir = await workspace();
+  const zip = path.join(dir, 'export.zip');
+  await writeFile(zip, makeZip({
+    'projects.json': JSON.stringify([
+      { uuid: 'p1', name: 'Client', prompt_template: 'Instructions' },
+      { uuid: 'p2', name: 'Empty', prompt_template: '' },
+    ]),
+    'memories.json': JSON.stringify([{
+      account_uuid: 'acct-0000-1111',
+      conversations_memory: '- Prefers short answers\n- Works in Austin',
+      project_memories: { p1: 'Client wants weekly summaries', gone: 'Deleted project note' },
+    }]),
+  }));
+  const data = await collect({ exportPath: zip, skipLocalSkills: true, skipLocalMemories: true });
+  assert.equal(data.projects[0].memory, 'Client wants weekly summaries');
+  assert.equal(data.projects[1].memory, undefined);
+  assert.match(data.projects[1].migrationWarnings.join(' '), /No project instructions were found/);
+  assert.equal(data.projects[0].migrationWarnings, undefined);
+  assert.deepEqual(data.memories.map((m) => m.value), ['Prefers short answers', 'Works in Austin']);
+  assert.match(data.sourceWarnings.join(' '), /1 project\(s\).*gone/);
+  assert.doesNotThrow(() => validateBundle(makeBundle(data)));
+});
+
+test('staged project memory wins over the export and is validated with the context', async () => {
+  const dir = await workspace();
+  await writeFile(path.join(dir, 'projects.json'), JSON.stringify([
+    { id: 'p1', name: 'Client', instructions: 'Be precise', context: '', memory: 'Staged memory' },
+  ]));
+  const data = await collect({ inputsDir: dir, skipLocalSkills: true, skipLocalMemories: true });
+  assert.equal(data.projects[0].memory, 'Staged memory');
+  const bundle = (project) => ({ format: 'claude-migration-bundle', version: 1, projects: [project] });
+  const project = { id: 'p', name: 'n', instructions: '', context: 'c'.repeat(99_000) };
+  assert.doesNotThrow(() => validateBundle(bundle({ ...project, memory: 'm'.repeat(900) })));
+  assert.throws(() => validateBundle(bundle({ ...project, memory: 'm'.repeat(1_000) })), /context and memory together/);
+});
